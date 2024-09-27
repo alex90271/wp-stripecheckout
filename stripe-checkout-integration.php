@@ -1,9 +1,9 @@
 <?php /**
- * Plugin Name: Stripe Checkout Integration
- * Description: Integrates Stripe Checkout Sessions with WordPress, including shipping
- * Version: 1.1
- * Author: Your Name
- */
+  * Plugin Name: Stripe Checkout Integration
+  * Description: Integrates Stripe Checkout Sessions with WordPress, including shipping
+  * Version: 1.1
+  * Author: Your Name
+  */
 
 if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly
@@ -12,19 +12,22 @@ if (!defined('ABSPATH')) {
 // Include Stripe PHP library
 require_once(plugin_dir_path(__FILE__) . 'stripe-php/init.php');
 
-class StripeCheckoutIntegration {
+class StripeCheckoutIntegration
+{
     private $stripe_secret_key;
     private $shipping_rate_id;
     private $shipping_rate_info;
+    private $enable_invoice_creation;
 
     public function __construct() {
-        // Initialize settings
-        add_action('admin_init', array($this, 'register_settings'));
-        add_action('admin_menu', array($this, 'add_settings_page'));
-
+        // Initialize properties
         $this->stripe_secret_key = get_option('stripe_secret_key');
         $this->shipping_rate_id = get_option('stripe_shipping_rate_id');
         $this->shipping_rate_info = null;
+        $this->enable_invoice_creation = get_option('stripe_enable_invoice_creation', 'no');
+
+        add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_menu', array($this, 'add_settings_page'));
 
         // Register shortcode
         add_shortcode('stripe-checkout', array($this, 'stripe_checkout_shortcode'));
@@ -49,13 +52,16 @@ class StripeCheckoutIntegration {
     public function register_settings() {
         register_setting('stripe_checkout_options', 'stripe_secret_key');
         register_setting('stripe_checkout_options', 'stripe_shipping_rate_id');
+        register_setting('stripe_checkout_options', 'stripe_enable_invoice_creation');
     }
 
-    public function add_settings_page() {
+    public function add_settings_page()
+    {
         add_options_page('Stripe Checkout Settings', 'Stripe Checkout', 'manage_options', 'stripe-checkout-settings', array($this, 'render_settings_page'));
     }
 
-    public function fetch_shipping_rate_info() {
+    public function fetch_shipping_rate_info()
+    {
         if (!empty($this->shipping_rate_id)) {
             try {
                 $shipping_rate = \Stripe\ShippingRate::retrieve($this->shipping_rate_id);
@@ -86,6 +92,13 @@ class StripeCheckoutIntegration {
                         <th scope="row">Stripe Shipping Rate ID</th>
                         <td><input type="text" name="stripe_shipping_rate_id" value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
                     </tr>
+                    <tr valign="top">
+                        <th scope="row">Enable Invoice Creation</th>
+                        <td>
+                            <input type="checkbox" name="stripe_enable_invoice_creation" value="yes" <?php checked(get_option('stripe_enable_invoice_creation'), 'yes'); ?> />
+                            <span class="description">Check this box to automatically create invoices for successful payments</span>
+                        </td>
+                    </tr>
                 </table>
                 <?php submit_button(); ?>
             </form>
@@ -93,7 +106,8 @@ class StripeCheckoutIntegration {
         <?php
     }
 
-    public function stripe_checkout_shortcode() {
+    public function stripe_checkout_shortcode()
+    {
         ob_start();
         ?>
         <div id="stripe-checkout-container">
@@ -107,7 +121,8 @@ class StripeCheckoutIntegration {
         return ob_get_clean();
     }
 
-    public function enqueue_scripts() {
+    public function enqueue_scripts()
+    {
         wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.1', true);
         wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
 
@@ -119,7 +134,8 @@ class StripeCheckoutIntegration {
         ));
     }
 
-    private function init_stripe() {
+    private function init_stripe()
+    {
         $this->stripe_secret_key = get_option('stripe_secret_key');
         $this->shipping_rate_id = get_option('stripe_shipping_rate_id');
 
@@ -127,7 +143,8 @@ class StripeCheckoutIntegration {
             \Stripe\Stripe::setApiKey($this->stripe_secret_key);
         }
     }
-    public function fetch_stripe_products() {
+    public function fetch_stripe_products()
+    {
         try {
             $products = \Stripe\Product::all([
                 'active' => true,
@@ -135,7 +152,7 @@ class StripeCheckoutIntegration {
                 'expand' => ['data.default_price']
             ]);
 
-            $formatted_products = array_map(function($product) {
+            $formatted_products = array_map(function ($product) {
                 return [
                     'id' => $product->id,
                     'name' => $product->name,
@@ -152,7 +169,8 @@ class StripeCheckoutIntegration {
         wp_die();
     }
 
-    public function get_stripe_product() {
+    public function get_stripe_product()
+    {
         if (!isset($_POST['product_id'])) {
             wp_send_json_error('No product ID provided');
         }
@@ -202,6 +220,13 @@ class StripeCheckoutIntegration {
                 ],
             ];
 
+            // Add invoice creation if enabled
+            if ($this->enable_invoice_creation === 'yes') {
+                $session_params['invoice_creation'] = [
+                    'enabled' => true,
+                ];
+            }
+
             // Add shipping options if a shipping rate ID is set
             if (!empty($this->shipping_rate_id)) {
                 $session_params['shipping_options'] = [
@@ -220,7 +245,8 @@ class StripeCheckoutIntegration {
         wp_die();
     }
 
-    private function group_cart_items($cart) {
+    private function group_cart_items($cart)
+    {
         $grouped_cart = [];
         foreach ($cart as $item) {
             $key = $item['id'];
