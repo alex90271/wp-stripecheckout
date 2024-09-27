@@ -47,7 +47,9 @@
     function updateCart() {
         const cartEl = $('#cart');
         cartEl.empty();
+        let subtotal = 0;
         cart.forEach(item => {
+            subtotal += item.price;
             cartEl.append(`
                 <div class="cart-item">
                     <span>${item.name}</span>
@@ -56,6 +58,14 @@
                 </div>
             `);
         });
+
+        // Display subtotal
+        cartEl.append(`<div class="cart-subtotal">Subtotal: ${formatPrice(subtotal, 'USD')}</div>`);
+
+        // Display shipping information if available
+        if (stripe_checkout_vars.shipping_rate_id) {
+            cartEl.append(`<div class="cart-shipping">Shipping: To be calculated at checkout</div>`);
+        }
     }
 
     $(document).on('click', '.add-to-cart', function() {

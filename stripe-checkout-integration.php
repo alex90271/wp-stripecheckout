@@ -1,12 +1,11 @@
-<?php
-/**
+<?php /**
  * Plugin Name: Stripe Checkout Integration
- * Description: Integrates Stripe Checkout Sessions with WordPress
- * Version: 1.0
+ * Description: Integrates Stripe Checkout Sessions with WordPress, including shipping
+ * Version: 1.1
  * Author: Your Name
  */
 
- if (!defined('ABSPATH')) {
+if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly
 }
 
@@ -15,6 +14,7 @@ require_once(plugin_dir_path(__FILE__) . 'stripe-php/init.php');
 
 class StripeCheckoutIntegration {
     private $stripe_secret_key;
+    private $shipping_rate_id;
 
     public function __construct() {
         // Initialize settings
@@ -41,6 +41,7 @@ class StripeCheckoutIntegration {
 
     public function register_settings() {
         register_setting('stripe_checkout_options', 'stripe_secret_key');
+        register_setting('stripe_checkout_options', 'stripe_shipping_rate_id');
     }
 
     public function add_settings_page() {
@@ -58,6 +59,10 @@ class StripeCheckoutIntegration {
                     <tr valign="top">
                         <th scope="row">Stripe Secret Key</th>
                         <td><input type="password" name="stripe_secret_key" value="<?php echo esc_attr(get_option('stripe_secret_key')); ?>" /></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Stripe Shipping Rate ID</th>
+                        <td><input type="text" name="stripe_shipping_rate_id" value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
                     </tr>
                 </table>
                 <?php submit_button(); ?>
@@ -81,17 +86,19 @@ class StripeCheckoutIntegration {
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.0', true);
+        wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.1', true);
         wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
 
-        // Pass the AJAX URL to our script
+        // Pass the AJAX URL and shipping rate ID to our script
         wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
             'ajax_url' => admin_url('admin-ajax.php'),
+            'shipping_rate_id' => get_option('stripe_shipping_rate_id'),
         ));
     }
 
     private function init_stripe() {
         $this->stripe_secret_key = get_option('stripe_secret_key');
+        $this->shipping_rate_id = get_option('stripe_shipping_rate_id');
 
         if (!empty($this->stripe_secret_key)) {
             \Stripe\Stripe::setApiKey($this->stripe_secret_key);
@@ -148,7 +155,6 @@ class StripeCheckoutIntegration {
         }
         wp_die();
     }
-
     public function create_checkout_session() {
         if (!isset($_POST['cart'])) {
             wp_send_json_error('No cart data provided');
@@ -170,13 +176,24 @@ class StripeCheckoutIntegration {
                 ];
             }, $cart);
 
-            $session = \Stripe\Checkout\Session::create([
+            $session_params = [
                 'payment_method_types' => ['card'],
                 'line_items' => $line_items,
                 'mode' => 'payment',
                 'success_url' => home_url('?checkout=success'),
                 'cancel_url' => home_url('?checkout=cancelled'),
-            ]);
+            ];
+
+            // Add shipping options if a shipping rate ID is set
+            if (!empty($this->shipping_rate_id)) {
+                $session_params['shipping_options'] = [
+                    [
+                        'shipping_rate' => $this->shipping_rate_id,
+                    ],
+                ];
+            }
+
+            $session = \Stripe\Checkout\Session::create($session_params);
 
             wp_send_json_success(['url' => $session->url]);
         } catch (\Exception $e) {
