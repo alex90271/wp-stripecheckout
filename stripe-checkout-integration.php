@@ -163,18 +163,7 @@ class StripeCheckoutIntegration {
         $cart = json_decode(stripslashes($_POST['cart']), true);
 
         try {
-            $line_items = array_map(function($item) {
-                return [
-                    'price_data' => [
-                        'currency' => 'usd',
-                        'product_data' => [
-                            'name' => $item['name'],
-                        ],
-                        'unit_amount' => $item['price'],
-                    ],
-                    'quantity' => 1,
-                ];
-            }, $cart);
+            $line_items = $this->group_cart_items($cart);
 
             $session_params = [
                 'payment_method_types' => ['card'],
@@ -200,6 +189,28 @@ class StripeCheckoutIntegration {
             wp_send_json_error($e->getMessage());
         }
         wp_die();
+    }
+
+    private function group_cart_items($cart) {
+        $grouped_cart = [];
+        foreach ($cart as $item) {
+            $key = $item['id'];
+            if (isset($grouped_cart[$key])) {
+                $grouped_cart[$key]['quantity'] += 1;
+            } else {
+                $grouped_cart[$key] = [
+                    'price_data' => [
+                        'currency' => 'usd',
+                        'product_data' => [
+                            'name' => $item['name'],
+                        ],
+                        'unit_amount' => $item['price'],
+                    ],
+                    'quantity' => 1,
+                ];
+            }
+        }
+        return array_values($grouped_cart);
     }
 }
 

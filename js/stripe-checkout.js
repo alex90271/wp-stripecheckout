@@ -48,12 +48,14 @@
         const cartEl = $('#cart');
         cartEl.empty();
         let subtotal = 0;
-        cart.forEach(item => {
-            subtotal += item.price;
+        let groupedCart = groupCartItems(cart);
+
+        groupedCart.forEach(item => {
+            subtotal += item.price * item.quantity;
             cartEl.append(`
                 <div class="cart-item">
-                    <span>${item.name}</span>
-                    <span>${formatPrice(item.price, item.currency)}</span>
+                    <span>${item.quantity}x ${item.name}</span>
+                    <span>${formatPrice(item.price * item.quantity, item.currency)}</span>
                     <button class="remove-from-cart" data-product-id="${item.id}">Remove</button>
                 </div>
             `);
@@ -66,6 +68,18 @@
         if (stripe_checkout_vars.shipping_rate_id) {
             cartEl.append(`<div class="cart-shipping">Shipping: To be calculated at checkout</div>`);
         }
+    }
+
+    function groupCartItems(cart) {
+        let groupedCart = {};
+        cart.forEach(item => {
+            if (groupedCart[item.id]) {
+                groupedCart[item.id].quantity += 1;
+            } else {
+                groupedCart[item.id] = { ...item, quantity: 1 };
+            }
+        });
+        return Object.values(groupedCart);
     }
 
     $(document).on('click', '.add-to-cart', function() {
@@ -90,7 +104,10 @@
 
     $(document).on('click', '.remove-from-cart', function() {
         const productId = $(this).data('product-id');
-        cart = cart.filter(item => item.id !== productId);
+        const index = cart.findIndex(item => item.id === productId);
+        if (index !== -1) {
+            cart.splice(index, 1);
+        }
         updateCart();
     });
 
