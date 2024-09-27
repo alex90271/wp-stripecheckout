@@ -68,8 +68,7 @@
             cartEl.append(`
                 <div class="cart-item">
                     <span>${item.quantity}x ${item.name}</span>
-                    <span>${formatPrice(item.price * item.quantity, item.currency)}</span>
-                    <button class="remove-from-cart wp-block-button__link wp-element-button" data-product-id="${item.id}">Remove</button>
+                    <button class="remove-from-cart" data-product-id="${item.id}">Remove</button>
                 </div>
             `);
         });
@@ -90,7 +89,7 @@
             const total = subtotal + shippingRate.amount;
             cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
         } else {
-            cartEl.append(`<div class="cart-shipping">Shipping: To be calculated at checkout</div>`);
+            cartEl.append(`<div class="cart-shipping">Shipping: Calculated at checkout</div>`);
         }
     }
 
