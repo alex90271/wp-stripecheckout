@@ -143,26 +143,31 @@ class StripeCheckoutIntegration
             \Stripe\Stripe::setApiKey($this->stripe_secret_key);
         }
     }
-    public function fetch_stripe_products()
-    {
+    public function fetch_stripe_products() {
         try {
             $products = \Stripe\Product::all([
                 'active' => true,
-                'limit' => 10,
+                'limit' => 100, // Increased limit to ensure we get all products
                 'expand' => ['data.default_price']
             ]);
 
-            $formatted_products = array_map(function ($product) {
+            $formatted_products = array_filter(array_map(function($product) {
+                // Skip products that are marked as shipping
+                if ($product->name === 'Shipping') {
+                    return null;
+                }
+
                 return [
                     'id' => $product->id,
                     'name' => $product->name,
                     'description' => $product->description,
                     'price' => $product->default_price ? $product->default_price->unit_amount : null,
-                    'currency' => $product->default_price ? $product->default_price->currency : null
+                    'currency' => $product->default_price ? $product->default_price->currency : null,
+                    'image' => $product->images[0] ?? null // Get the first image if available
                 ];
-            }, $products->data);
+            }, $products->data));
 
-            wp_send_json_success($formatted_products);
+            wp_send_json_success(array_values($formatted_products)); // Re-index the array
         } catch (\Exception $e) {
             wp_send_json_error($e->getMessage());
         }

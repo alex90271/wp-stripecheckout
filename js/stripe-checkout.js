@@ -1,5 +1,7 @@
 (function($) {
     let cart = [];
+    let shippingRate = null;
+
 
     function fetchProducts() {
         $.ajax({
@@ -21,17 +23,28 @@
     function displayProducts(products) {
         const productList = $('#product-list');
         productList.empty();
+        
+        if (products.length === 0) {
+            productList.append('<p>No products available at the moment.</p>');
+            return;
+        }
+
+        productList.addClass('product-grid'); // Add a class for styling the grid
+
         products.forEach(product => {
             const priceDisplay = product.price 
-                ? `Price: ${formatPrice(product.price, product.currency)}` 
+                ? `${formatPrice(product.price, product.currency)}` 
                 : 'Price not available';
             
+            const imageUrl = product.image || 'https://placehold.co/600x400/000000/FFFFFF.png'; // Use a placeholder if no image
+
             productList.append(`
-                <div class="product">
+                <div class="product-item">
+                    <img src="${imageUrl}" alt="${product.name}" class="product-image">
                     <h3>${product.name}</h3>
-                    <p>${product.description || 'No description available'}</p>
-                    <p>${priceDisplay}</p>
-                    ${product.price ? `<button class="wp-block-button__link wp-element-button add-to-cart" data-product-id="${product.id}">Add to Cart</button>` : ''}
+                    <p class="product-description">${product.description || 'No description available'}</p>
+                    <p class="product-price">${priceDisplay}</p>
+                    ${product.price ? `<button class="add-to-cart wp-block-button__link wp-element-button" data-product-id="${product.id}">Add to Cart</button>` : ''}
                 </div>
             `);
         });
@@ -65,20 +78,19 @@
         cartEl.append(`<div class="cart-subtotal">Subtotal: ${formatPrice(subtotal, 'USD')}</div>`);
 
         // Display shipping information if available
-        if (stripe_checkout_vars.shipping_rate_info) {
-            const shippingInfo = stripe_checkout_vars.shipping_rate_info;
+        if (shippingRate) {
             cartEl.append(`
                 <div class="cart-shipping">
-                    Shipping: ${shippingInfo.display_name}
-                    ${formatPrice(shippingInfo.amount, shippingInfo.currency)}
+                    Shipping: ${shippingRate.display_name}
+                    ${formatPrice(shippingRate.amount, shippingRate.currency)}
                 </div>
             `);
 
             // Calculate and display total
-            const total = subtotal + shippingInfo.amount;
+            const total = subtotal + shippingRate.amount;
             cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
         } else {
-            cartEl.append(`<div class="cart-shipping">Shipping: Not available</div>`);
+            cartEl.append(`<div class="cart-shipping">Shipping: To be calculated at checkout</div>`);
         }
     }
 
@@ -144,5 +156,7 @@
 
     $(document).ready(function() {
         fetchProducts();
+        fetchshippingRate();
+        // Add classes to the checkout button
     });
 })(jQuery);
