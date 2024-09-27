@@ -2,7 +2,6 @@
     let cart = [];
     let shippingRate = null;
 
-
     function fetchProducts() {
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
@@ -29,14 +28,14 @@
             return;
         }
 
-        productList.addClass('product-grid'); // Add a class for styling the grid
+        productList.addClass('product-grid');
 
         products.forEach(product => {
             const priceDisplay = product.price 
                 ? `${formatPrice(product.price, product.currency)}` 
                 : 'Price not available';
             
-            const imageUrl = product.image || 'https://placehold.co/600x400/000000/FFFFFF.png'; // Use a placeholder if no image
+            const imageUrl = product.image || 'https://placehold.co/600x400/000000/FFFFFF.png';
 
             productList.append(`
                 <div class="product-item">
@@ -73,10 +72,8 @@
             `);
         });
 
-        // Display subtotal
         cartEl.append(`<div class="cart-subtotal">Subtotal: ${formatPrice(subtotal, 'USD')}</div>`);
 
-        // Display shipping information if available
         if (shippingRate) {
             cartEl.append(`
                 <div class="cart-shipping">
@@ -85,7 +82,6 @@
                 </div>
             `);
 
-            // Calculate and display total
             const total = subtotal + shippingRate.amount;
             cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
         } else {
@@ -103,6 +99,12 @@
             }
         });
         return Object.values(groupedCart);
+    }
+
+    function initShippingRate() {
+        if (stripe_checkout_vars.shipping_rate_info) {
+            shippingRate = stripe_checkout_vars.shipping_rate_info;
+        }
     }
 
     $(document).on('click', '.add-to-cart', function() {
@@ -144,7 +146,6 @@
             },
             success: function(response) {
                 if (response.success) {
-                    // Redirect to Stripe Checkout
                     window.location.href = response.data.url;
                 } else {
                     console.error('Error creating checkout session:', response.data);
@@ -155,7 +156,7 @@
 
     $(document).ready(function() {
         fetchProducts();
-        fetchshippingRate();
-        // Add classes to the checkout button
+        initShippingRate();
+        updateCart();
     });
 })(jQuery);
