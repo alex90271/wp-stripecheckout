@@ -31,7 +31,7 @@
                     <h3>${product.name}</h3>
                     <p>${product.description || 'No description available'}</p>
                     <p>${priceDisplay}</p>
-                    ${product.price ? `<button class="add-to-cart" data-product-id="${product.id}">Add to Cart</button>` : ''}
+                    ${product.price ? `<button class="wp-block-button__link wp-element-button add-to-cart" data-product-id="${product.id}">Add to Cart</button>` : ''}
                 </div>
             `);
         });
@@ -56,7 +56,7 @@
                 <div class="cart-item">
                     <span>${item.quantity}x ${item.name}</span>
                     <span>${formatPrice(item.price * item.quantity, item.currency)}</span>
-                    <button class="remove-from-cart" data-product-id="${item.id}">Remove</button>
+                    <button class="remove-from-cart wp-block-button__link wp-element-button" data-product-id="${item.id}">Remove</button>
                 </div>
             `);
         });
@@ -65,8 +65,20 @@
         cartEl.append(`<div class="cart-subtotal">Subtotal: ${formatPrice(subtotal, 'USD')}</div>`);
 
         // Display shipping information if available
-        if (stripe_checkout_vars.shipping_rate_id) {
-            cartEl.append(`<div class="cart-shipping">Shipping: To be calculated at checkout</div>`);
+        if (stripe_checkout_vars.shipping_rate_info) {
+            const shippingInfo = stripe_checkout_vars.shipping_rate_info;
+            cartEl.append(`
+                <div class="cart-shipping">
+                    Shipping: ${shippingInfo.display_name}
+                    ${formatPrice(shippingInfo.amount, shippingInfo.currency)}
+                </div>
+            `);
+
+            // Calculate and display total
+            const total = subtotal + shippingInfo.amount;
+            cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
+        } else {
+            cartEl.append(`<div class="cart-shipping">Shipping: Not available</div>`);
         }
     }
 

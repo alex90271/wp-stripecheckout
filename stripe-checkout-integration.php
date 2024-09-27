@@ -15,11 +15,16 @@ require_once(plugin_dir_path(__FILE__) . 'stripe-php/init.php');
 class StripeCheckoutIntegration {
     private $stripe_secret_key;
     private $shipping_rate_id;
+    private $shipping_rate_info;
 
     public function __construct() {
         // Initialize settings
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_menu', array($this, 'add_settings_page'));
+
+        $this->stripe_secret_key = get_option('stripe_secret_key');
+        $this->shipping_rate_id = get_option('stripe_shipping_rate_id');
+        $this->shipping_rate_info = null;
 
         // Register shortcode
         add_shortcode('stripe-checkout', array($this, 'stripe_checkout_shortcode'));
@@ -37,6 +42,8 @@ class StripeCheckoutIntegration {
 
         // Initialize Stripe
         $this->init_stripe();
+
+        add_action('init', array($this, 'fetch_shipping_rate_info'));
     }
 
     public function register_settings() {
@@ -46,6 +53,21 @@ class StripeCheckoutIntegration {
 
     public function add_settings_page() {
         add_options_page('Stripe Checkout Settings', 'Stripe Checkout', 'manage_options', 'stripe-checkout-settings', array($this, 'render_settings_page'));
+    }
+
+    public function fetch_shipping_rate_info() {
+        if (!empty($this->shipping_rate_id)) {
+            try {
+                $shipping_rate = \Stripe\ShippingRate::retrieve($this->shipping_rate_id);
+                $this->shipping_rate_info = [
+                    'amount' => $shipping_rate->fixed_amount->amount,
+                    'currency' => $shipping_rate->fixed_amount->currency,
+                    'display_name' => $shipping_rate->display_name
+                ];
+            } catch (\Exception $e) {
+                error_log('Error fetching shipping rate: ' . $e->getMessage());
+            }
+        }
     }
 
     public function render_settings_page() {
@@ -79,7 +101,7 @@ class StripeCheckoutIntegration {
             <div id="product-list"></div>
             <h3>Cart</h3>
             <div id="cart"></div>
-            <button id="checkout-button">Checkout</button>
+            <button id="checkout-button" class="wp-block-button__link wp-element-button">Checkout</button>
         </div>
         <?php
         return ob_get_clean();
@@ -89,10 +111,11 @@ class StripeCheckoutIntegration {
         wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.1', true);
         wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
 
-        // Pass the AJAX URL and shipping rate ID to our script
+        // Pass the AJAX URL, shipping rate ID, and shipping rate info to our script
         wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
             'ajax_url' => admin_url('admin-ajax.php'),
-            'shipping_rate_id' => get_option('stripe_shipping_rate_id'),
+            'shipping_rate_id' => $this->shipping_rate_id,
+            'shipping_rate_info' => $this->shipping_rate_info
         ));
     }
 
