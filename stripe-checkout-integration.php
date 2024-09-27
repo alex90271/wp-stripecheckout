@@ -171,6 +171,12 @@ class StripeCheckoutIntegration {
                 'mode' => 'payment',
                 'success_url' => home_url('?checkout=success'),
                 'cancel_url' => home_url('?checkout=cancelled'),
+                'phone_number_collection' => [
+                    'enabled' => true,
+                ],
+                'shipping_address_collection' => [
+                    'allowed_countries' => ['US', 'CA'], // Add or remove countries as needed
+                ],
             ];
 
             // Add shipping options if a shipping rate ID is set
