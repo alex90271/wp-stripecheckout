@@ -34,6 +34,8 @@ class StripeCheckoutIntegration
 
         // Register shortcode
         add_shortcode('stripe-checkout', array($this, 'stripe_checkout_shortcode'));
+        add_shortcode('stripe-checkout-success', array($this, 'stripe_checkout_success_shortcode'));
+
 
         // Enqueue scripts and styles
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
@@ -51,10 +53,10 @@ class StripeCheckoutIntegration
     }
 
     private function get_encryption_key() {
-        $key = get_option('stripe_encryption_key');
+        $key = get_option('salted_key');
         if (!$key) {
-            $key = wp_generate_password(32, true, true);
-            update_option('stripe_encryption_key', $key);
+            $key = date('Y-m-d H:i:s');
+            update_option('salted_key', $key);
         }
         return $key;
     }
@@ -82,6 +84,102 @@ class StripeCheckoutIntegration
         }
         list($encrypted_data, $iv) = $parts;
         return openssl_decrypt($encrypted_data, 'AES-256-CBC', $this->encryption_key, 0, $iv);
+    }
+
+    public function stripe_checkout_success_shortcode() {
+        // Check if the checkout was successful
+        if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
+            // Get session ID from URL parameters
+            $session_id = isset($_GET['session_id']) ? sanitize_text_field($_GET['session_id']) : '';
+
+            if (!empty($session_id)) {
+                // Retrieve session details from Stripe
+                try {
+                    $this->init_stripe();
+                    $session = \Stripe\Checkout\Session::retrieve($session_id);
+
+                    // Prepare email content
+                    $to = get_option('admin_email');
+                    $subject = 'New Successful Stripe Checkout';
+                    $message = $this->prepare_email_content($session);
+                    $headers = array('Content-Type: text/html; charset=UTF-8');
+
+                    // Send email
+                    $email_sent = wp_mail($to, $subject, $message, $headers);
+
+                    if ($email_sent) {
+                        return '<p>Thank you for your purchase! An email confirmation has been sent to you via Stripe.</p>';
+                    } else {
+                        error_log('Failed to send admin email for Stripe Checkout session: ' . $session_id);
+                        return '<p>Thank you for your purchase! An email confirmation has been sent to you via Stripe.</p>';
+                    }
+                } catch (\Exception $e) {
+                    error_log('Error retrieving Stripe Checkout session: ' . $e->getMessage());
+                    return '<p>Thank you for your purchase! There was an issue processing some details, but your order should still be received. If you do not receive an email confirmation via Stripe, please let us know. </p>';
+                }
+            }
+        }
+
+        return '<p>Invalid checkout session.</p>';
+    }
+
+    private function prepare_email_content($session) {
+        $customer = $session->customer_details;
+        $line_items = $this->retrieve_line_items($session->id);
+        $payment_intent = $session->payment_intent;
+
+        // Use the existing shipping rate info
+        $shipping_cost = $this->shipping_rate_info ? $this->shipping_rate_info['amount'] : 0;
+        $shipping_name = $this->shipping_rate_info ? $this->shipping_rate_info['display_name'] : 'Shipping';
+
+        $content = "
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; }
+                table { border-collapse: collapse; width: 100%; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+            </style>
+        </head>
+        <body>
+            <h2>New Successful Stripe Checkout</h2>
+            <p><strong>Customer:</strong> {$customer->name} ({$customer->email})</p>
+            <p><strong>Subtotal:</strong> " . $this->format_amount($session->amount_subtotal, $session->currency) . "</p>
+            <p><strong>{$shipping_name}:</strong> " . $this->format_amount($shipping_cost, $session->currency) . "</p>
+            <p><strong>Total Amount:</strong> " . $this->format_amount($session->amount_total, $session->currency) . "</p>
+            <p><strong>Stripe Payment Intent ID:</strong> <a href='https://dashboard.stripe.com/payments/{$payment_intent}'>{$payment_intent}</a></p>
+            <h3>Purchased Items:</h3>
+            <table>
+                <tr>
+                    <th>Product</th>
+                    <th>Quantity</th>
+                    <th>Price</th>
+                </tr>";
+
+        foreach ($line_items as $item) {
+            $content .= "
+                <tr>
+                    <td>{$item->description}</td>
+                    <td>{$item->quantity}</td>
+                    <td>" . $this->format_amount($item->amount_total, $session->currency) . "</td>
+                </tr>";
+        }
+
+        $content .= "
+            </table>
+        </body>
+        </html>";
+
+        return $content;
+    }
+
+    private function retrieve_line_items($session_id) {
+        return \Stripe\Checkout\Session::allLineItems($session_id);
+    }
+
+    private function format_amount($amount, $currency) {
+        return number_format($amount / 100, 2) . ' ' . strtoupper($currency);
     }
 
     private function get_stripe_secret_key() {
@@ -149,6 +247,7 @@ class StripeCheckoutIntegration
             }
         }
     }
+    
 
     private function init_stripe() {
         $stripe_secret_key = $this->get_stripe_secret_key();
@@ -231,8 +330,8 @@ class StripeCheckoutIntegration
                 'payment_method_types' => ['card'],
                 'line_items' => $line_items,
                 'mode' => 'payment',
-                'success_url' => home_url('?checkout=success'),
-                'cancel_url' => home_url('?checkout=cancelled'),
+                'success_url' => home_url('/success?checkout=success&session_id={CHECKOUT_SESSION_ID}'),
+                'cancel_url' => home_url('/store/?checkout=cancel'),
                 'phone_number_collection' => [
                     'enabled' => true,
                 ],
