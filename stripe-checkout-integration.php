@@ -86,6 +86,65 @@ class StripeCheckoutIntegration
         return openssl_decrypt($encrypted_data, 'AES-256-CBC', $this->encryption_key, 0, $iv);
     }
 
+    private function send_groupme_notification($session, $bot_id) {
+        if (empty($bot_id)) {
+            error_log('GroupMe Bot ID is not set');
+            return false;
+        }
+    
+        $group_id = get_option('groupme_group_id');
+        if (empty($group_id)) {
+            error_log('GroupMe Group ID is not set');
+            return false;
+        }
+    
+        $customer = $session->customer_details;
+        $shipping_cost = isset($session->total_details->breakdown->shipping) 
+            ? $session->total_details->breakdown->shipping->amount 
+            : 0;
+    
+        $message = "New Stripe Order!\n";
+        $message .= "Customer: {$customer->name}\n";
+        $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " " . strtoupper($session->currency) . "\n";
+        $message .= "Payment Intent ID: {$session->payment_intent}\n";
+
+        $url = 'https://api.groupme.com/v3/groups/' . $group_id . '/messages';
+        $data = array(
+            'message' => array(
+                'source_guid' => 'STRIPE_CHECKOUT_' . time(),
+                'text' => $message,
+            )
+        );
+    
+        $options = array(
+            'http' => array(
+                'header'  => "Content-type: application/json\r\n" .
+                             "X-Access-Token: " . $bot_id . "\r\n",
+                'method'  => 'POST',
+                'content' => json_encode($data)
+            )
+        );
+    
+        $context = stream_context_create($options);
+        
+        // Use error suppression operator to catch warnings
+        $result = @file_get_contents($url, false, $context);
+    
+        if ($result === FALSE) {
+            $error = error_get_last();
+            error_log('Error sending GroupMe message: ' . $error['message']);
+            
+            // Log additional debug information
+            error_log('GroupMe API URL: ' . $url);
+            error_log('GroupMe request data: ' . print_r($data, true));
+            error_log('GroupMe API response: ' . print_r($http_response_header, true));
+            
+            return false;
+        }
+    
+        return true;
+    }
+
     public function stripe_checkout_success_shortcode() {
         // Check if the checkout was successful
         if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
@@ -107,22 +166,28 @@ class StripeCheckoutIntegration
                     // Send email
                     $email_sent = wp_mail($to, $subject, $message, $headers);
 
-                    if ($email_sent) {
-                        return '<p>Thank you for your purchase! An email confirmation has been sent to you via Stripe.</p>';
+                    // Send GroupMe notification if enabled
+                    $groupme_sent = true;
+                    if (get_option('enable_groupme_notifications') == 1) {
+                        $groupme_bot_id = get_option('groupme_bot_id');
+                        $groupme_sent = $this->send_groupme_notification($session, $groupme_bot_id);
+                    }
+
+                    if ($email_sent && $groupme_sent) {
+                        return '<p>Thank you for your purchase! A confirmation has been sent to the admin. You will receive an email confirmation from Stripe.</p>';
                     } else {
-                        error_log('Failed to send admin email for Stripe Checkout session: ' . $session_id);
-                        return '<p>Thank you for your purchase! An email confirmation has been sent to you via Stripe.</p>';
+                        error_log('Failed to send admin notifications for Stripe Checkout session: ' . $session_id);
+                        return '<p>Thank you for your purchase! Your order has been received. You will receive an email confirmation from Stripe.</p>';
                     }
                 } catch (\Exception $e) {
-                    error_log('Error retrieving Stripe Checkout session: ' . $e->getMessage());
-                    return '<p>Thank you for your purchase! There was an issue processing some details, but your order should still be received. If you do not receive an email confirmation via Stripe, please let us know. </p>';
+                    error_log('Error processing Stripe Checkout session: ' . $e->getMessage());
+                    return '<p>Thank you for your purchase! There was an hiccup along the way, but your order has been received. Please call us if you do not get an email confirmation from Stripe.</p>';
                 }
             }
         }
 
         return '<p>Invalid checkout session.</p>';
     }
-
     private function prepare_email_content($session) {
         $customer = $session->customer_details;
         $line_items = $this->retrieve_line_items($session->id);
@@ -191,6 +256,9 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_secret_key_encrypted', array($this, 'encrypt_api_key'));
         register_setting('stripe_checkout_options', 'stripe_shipping_rate_id');
         register_setting('stripe_checkout_options', 'stripe_enable_invoice_creation');
+        register_setting('stripe_checkout_options', 'groupme_bot_id');
+        register_setting('stripe_checkout_options', 'groupme_group_id');
+        register_setting('stripe_checkout_options', 'enable_groupme_notifications');
     }
 
     public function encrypt_api_key($value) {
@@ -223,6 +291,27 @@ class StripeCheckoutIntegration
                         <td>
                             <input type="checkbox" name="stripe_enable_invoice_creation" value="yes" <?php checked(get_option('stripe_enable_invoice_creation'), 'yes'); ?> />
                             <span class="description">Check this box to automatically create invoices for successful payments</span>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Enable GroupMe Notifications</th>
+                        <td>
+                            <input type="checkbox" name="enable_groupme_notifications" value="1" <?php checked(get_option('enable_groupme_notifications'), 1); ?> />
+                            <span class="description">Check this box to send notifications to GroupMe for successful payments</span>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">GroupMe Bot ID</th>
+                        <td>
+                            <input type="text" name="groupme_bot_id" value="<?php echo esc_attr(get_option('groupme_bot_id')); ?>" />
+                            <p class="description">Enter your GroupMe Bot ID here. This is required for GroupMe notifications to work.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">GroupMe Group ID</th>
+                        <td>
+                            <input type="text" name="groupme_group_id" value="<?php echo esc_attr(get_option('groupme_group_id')); ?>" />
+                            <p class="description">Enter your GroupMe Group ID here. This is required to send messages to a specific group.</p>
                         </td>
                     </tr>
                 </table>
