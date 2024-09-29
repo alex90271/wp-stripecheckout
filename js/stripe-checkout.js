@@ -1,4 +1,9 @@
 (function($) {
+    if (stripe_checkout_vars.store_disabled == '1') {
+        // Store is disabled, don't initialize anything
+        return;
+    }
+    
     let cart = [];
     let shippingRate = null;
 
@@ -41,13 +46,14 @@
                 <div class="product-item">
                     <img src="${imageUrl}" alt="${product.name}" class="product-image">
                     <h3>${product.name}</h3>
-                    <p class="product-description">${product.description || 'No description available'}</p>
+                    <p class="product-description">${product.description || ''}</p>
                     <p class="product-price">${priceDisplay}</p>
                     ${product.price ? `<button class="add-to-cart wp-block-button__link wp-element-button" data-product-id="${product.id}">Add to Cart</button>` : ''}
                 </div>
             `);
         });
     }
+
 
     function formatPrice(amount, currency) {
         return new Intl.NumberFormat('en-US', {

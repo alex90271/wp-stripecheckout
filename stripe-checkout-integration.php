@@ -19,6 +19,7 @@ class StripeCheckoutIntegration
     private $shipping_rate_info;
     private $enable_invoice_creation;
     private $encryption_key;
+    private $product_ids;
 
     public function __construct()
     {
@@ -29,6 +30,7 @@ class StripeCheckoutIntegration
         $this->shipping_rate_id = get_option('stripe_shipping_rate_id');
         $this->shipping_rate_info = null;
         $this->enable_invoice_creation = get_option('stripe_enable_invoice_creation', 'no');
+        $this->product_ids = get_option('stripe_product_ids', '');
 
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_menu', array($this, 'add_settings_page'));
@@ -196,21 +198,21 @@ class StripeCheckoutIntegration
                     if (!is_user_logged_in()) {
                         $this->redirect_to_store();
                     } else {
-                        return '<p>There was an error processing your order. Please contact support.</p>';
+                        return '<p>Invalid request. Please contact support.</p>';
                     }
                 }
             } else {
                 if (!is_user_logged_in()) {
                     $this->redirect_to_store();
                 } else {
-                    return '<p>Invalid session ID. Please try again or contact support.</p>';
+                    return '<p>Invalid request. Please contact support.</p>';
                 }
             }
         } else {
             if (!is_user_logged_in()) {
                 $this->redirect_to_store();
             } else {
-                return '<p>Checkout was not successful. Please try again or contact support.</p>';
+                return '<p>Invalid request. Please contact support.</p>';
             }
         }
     }
@@ -268,7 +270,6 @@ class StripeCheckoutIntegration
         $encrypted_key = get_option('stripe_secret_key_encrypted');
         return $this->decrypt($encrypted_key);
     }
-
     public function register_settings()
     {
         register_setting('stripe_checkout_options', 'stripe_secret_key_encrypted', array($this, 'encrypt_api_key'));
@@ -277,6 +278,10 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'groupme_bot_id');
         register_setting('stripe_checkout_options', 'groupme_group_id');
         register_setting('stripe_checkout_options', 'enable_groupme_notifications');
+        register_setting('stripe_checkout_options', 'stripe_product_ids');
+        register_setting('stripe_checkout_options', 'stripe_disable_store');
+        register_setting('stripe_checkout_options', 'stripe_store_disabled_message');
+
     }
 
     public function encrypt_api_key($value)
@@ -308,6 +313,29 @@ class StripeCheckoutIntegration
                         <th scope="row">Stripe Shipping Rate ID</th>
                         <td><input type="text" name="stripe_shipping_rate_id"
                                 value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Product IDs</th>
+                        <td>
+                            <textarea name="stripe_product_ids" rows="5"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_product_ids')); ?></textarea>
+                            <p class="description">Enter Stripe product IDs, one per line, to be displayed on the frontend.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Disable Store</th>
+                        <td>
+                            <input type="checkbox" name="stripe_disable_store" value="1" <?php checked(get_option('stripe_disable_store'), 1); ?> />
+                            <span class="description">Check this box to disable the store and display a custom message</span>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Store Disabled Message</th>
+                        <td>
+                            <textarea name="stripe_store_disabled_message" rows="5"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_store_disabled_message')); ?></textarea>
+                            <p class="description">Enter the message to display when the store is disabled</p>
+                        </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Enable Invoice Creation</th>
@@ -380,23 +408,22 @@ class StripeCheckoutIntegration
     {
         try {
             $this->init_stripe();
-            $products = \Stripe\Product::all([
-                'active' => true,
-                'limit' => 100,
-                'expand' => ['data.default_price']
-            ]);
+            $product_ids = array_filter(array_map('trim', explode("\n", $this->product_ids)));
 
-            $formatted_products = array_filter(array_map(function ($product) {
-                // Check if the product has the metadata 'display' set to true
-                if (!isset($product->metadata['display']) || $product->metadata['display'] !== 'true') {
-                    return null;
-                }
+            if (empty($product_ids)) {
+                wp_send_json_success([]);
+                return;
+            }
 
-                if ($product->name === 'Shipping') {
-                    return null;
-                }
+            $formatted_products = [];
 
-                return [
+            foreach ($product_ids as $product_id) {
+                $product = \Stripe\Product::retrieve([
+                    'id' => $product_id,
+                    'expand' => ['default_price']
+                ]);
+
+                $formatted_products[] = [
                     'id' => $product->id,
                     'name' => $product->name,
                     'description' => $product->description,
@@ -404,10 +431,7 @@ class StripeCheckoutIntegration
                     'currency' => $product->default_price ? $product->default_price->currency : null,
                     'image' => $product->images[0] ?? null
                 ];
-            }, $products->data));
-
-            // Remove null values and reset array keys
-            $formatted_products = array_values(array_filter($formatted_products));
+            }
 
             // Sort products by price (smallest to largest)
             usort($formatted_products, function ($a, $b) {
@@ -524,6 +548,11 @@ class StripeCheckoutIntegration
 
     public function stripe_checkout_shortcode()
     {
+        if (get_option('stripe_disable_store', 0) == 1) {
+            $disabled_message = get_option('stripe_store_disabled_message', 'The store is currently closed.');
+            return '<div class="store-disabled-message">' . wp_kses_post($disabled_message) . '</div>';
+        }
+
         ob_start();
         ?>
         <div id="stripe-checkout-container">
@@ -545,7 +574,8 @@ class StripeCheckoutIntegration
         wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'shipping_rate_id' => $this->shipping_rate_id,
-            'shipping_rate_info' => $this->shipping_rate_info
+            'shipping_rate_info' => $this->shipping_rate_info,
+            'store_disabled' => get_option('stripe_disable_store', 0)
         ));
     }
 }
