@@ -174,19 +174,26 @@ class StripeCheckoutIntegration
                     }
 
                     if ($email_sent && $groupme_sent) {
-                        return '<p>Thank you for your purchase! A confirmation has been sent to the admin. You will receive an email confirmation from Stripe.</p>';
+                        return '<p>Thank you for your purchase! You will receive an email confirmation from Stripe.</p>';
                     } else {
                         error_log('Failed to send admin notifications for Stripe Checkout session: ' . $session_id);
                         return '<p>Thank you for your purchase! Your order has been received. You will receive an email confirmation from Stripe.</p>';
                     }
                 } catch (\Exception $e) {
                     error_log('Error processing Stripe Checkout session: ' . $e->getMessage());
-                    return '<p>Thank you for your purchase! There was an hiccup along the way, but your order has been received. Please call us if you do not get an email confirmation from Stripe.</p>';
+                    $this->redirect_to_store();
                 }
+            } else {
+                $this->redirect_to_store();
             }
+        } else {
+            $this->redirect_to_store();
         }
+    }
 
-        return '<p>Invalid checkout session.</p>';
+    private function redirect_to_store() {
+        wp_redirect(home_url('/store'));
+        exit;
     }
     private function prepare_email_content($session) {
         $customer = $session->customer_details;
@@ -360,6 +367,10 @@ class StripeCheckoutIntegration
                     return null;
                 }
 
+                if ($product->name === 'Shipping') {
+                    return null;
+                }
+
                 return [
                     'id' => $product->id,
                     'name' => $product->name,
@@ -370,7 +381,15 @@ class StripeCheckoutIntegration
                 ];
             }, $products->data));
 
-            wp_send_json_success(array_values($formatted_products));
+            // Remove null values and reset array keys
+            $formatted_products = array_values(array_filter($formatted_products));
+
+            // Sort products by price (smallest to largest)
+            usort($formatted_products, function($a, $b) {
+                return $a['price'] - $b['price'];
+            });
+
+            wp_send_json_success($formatted_products);
         } catch (\Exception $e) {
             wp_send_json_error($e->getMessage());
         }
@@ -421,7 +440,7 @@ class StripeCheckoutIntegration
                 'line_items' => $line_items,
                 'mode' => 'payment',
                 'success_url' => home_url('/success?checkout=success&session_id={CHECKOUT_SESSION_ID}'),
-                'cancel_url' => home_url('/store/?checkout=cancel'),
+                'cancel_url' => home_url('/store?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
                 ],
