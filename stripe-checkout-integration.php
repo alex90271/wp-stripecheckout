@@ -106,7 +106,7 @@ class StripeCheckoutIntegration
         $message = "New Stripe Order!\n";
         $message .= "Customer: {$customer->name}\n";
         $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " " . strtoupper($session->currency) . "\n";
-        $message .= "Payment Intent ID: {$session->payment_intent}\n";
+        $message .= "ID: {$session->payment_intent}\n";
 
         $url = 'https://api.groupme.com/v3/groups/' . $group_id . '/messages';
         $data = array(
@@ -355,7 +355,8 @@ class StripeCheckoutIntegration
             ]);
 
             $formatted_products = array_filter(array_map(function($product) {
-                if ($product->name === 'Shipping') {
+                // Check if the product has the metadata 'display' set to true
+                if (!isset($product->metadata['display']) || $product->metadata['display'] !== 'true') {
                     return null;
                 }
 
