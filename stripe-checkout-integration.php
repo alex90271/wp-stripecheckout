@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Stripe Checkout Integration
- * Description: Integrates Stripe Checkout Sessions with WordPress, including shipping and encrypted API key
+ * Plugin Name: Simple Stripe Checkout
+ * Description: Integrates Stripe Checkout Sessions with WordPress, using products and shipping ID from Stripe.
  * Version: 1.4
- * Author: Your Name
+ * Author: Alex Alder
  */
 
 if (!defined('ABSPATH')) {
@@ -20,7 +20,8 @@ class StripeCheckoutIntegration
     private $enable_invoice_creation;
     private $encryption_key;
 
-    public function __construct() {
+    public function __construct()
+    {
         // Generate or retrieve the encryption key
         $this->encryption_key = $this->get_encryption_key();
 
@@ -52,7 +53,8 @@ class StripeCheckoutIntegration
         add_action('init', array($this, 'fetch_shipping_rate_info'));
     }
 
-    private function get_encryption_key() {
+    private function get_encryption_key()
+    {
         $key = get_option('salted_key');
         if (!$key) {
             $key = date('Y-m-d H:i:s');
@@ -61,7 +63,8 @@ class StripeCheckoutIntegration
         return $key;
     }
 
-    private function encrypt($value) {
+    private function encrypt($value)
+    {
         if (!extension_loaded('openssl')) {
             return $value; // Fallback if OpenSSL is not available
         }
@@ -70,7 +73,8 @@ class StripeCheckoutIntegration
         return base64_encode($encrypted . '::' . $iv);
     }
 
-    private function decrypt($value) {
+    private function decrypt($value)
+    {
         if (!extension_loaded('openssl')) {
             return $value; // Fallback if OpenSSL is not available
         }
@@ -86,25 +90,26 @@ class StripeCheckoutIntegration
         return openssl_decrypt($encrypted_data, 'AES-256-CBC', $this->encryption_key, 0, $iv);
     }
 
-    private function send_groupme_notification($session, $bot_id) {
+    private function send_groupme_notification($session, $bot_id)
+    {
         if (empty($bot_id)) {
             error_log('GroupMe Bot ID is not set');
             return false;
         }
-    
+
         $group_id = get_option('groupme_group_id');
         if (empty($group_id)) {
             error_log('GroupMe Group ID is not set');
             return false;
         }
-    
+
         $customer = $session->customer_details;
-        $shipping_cost = isset($session->total_details->breakdown->shipping) 
-            ? $session->total_details->breakdown->shipping->amount 
+        $shipping_cost = isset($session->total_details->breakdown->shipping)
+            ? $session->total_details->breakdown->shipping->amount
             : 0;
-    
+
         $message = "New Stripe Order!\n";
-        $message .= "Customer: {$customer->name}\n";
+        $message .= "Billed to: {$customer->name}\n";
         $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " " . strtoupper($session->currency) . "\n";
         $message .= "ID: {$session->payment_intent}\n";
 
@@ -115,87 +120,108 @@ class StripeCheckoutIntegration
                 'text' => $message,
             )
         );
-    
+
         $options = array(
             'http' => array(
-                'header'  => "Content-type: application/json\r\n" .
-                             "X-Access-Token: " . $bot_id . "\r\n",
-                'method'  => 'POST',
+                'header' => "Content-type: application/json\r\n" .
+                    "X-Access-Token: " . $bot_id . "\r\n",
+                'method' => 'POST',
                 'content' => json_encode($data)
             )
         );
-    
+
         $context = stream_context_create($options);
-        
+
         // Use error suppression operator to catch warnings
         $result = @file_get_contents($url, false, $context);
-    
+
         if ($result === FALSE) {
             $error = error_get_last();
             error_log('Error sending GroupMe message: ' . $error['message']);
-            
+
             // Log additional debug information
             error_log('GroupMe API URL: ' . $url);
             error_log('GroupMe request data: ' . print_r($data, true));
             error_log('GroupMe API response: ' . print_r($http_response_header, true));
-            
+
             return false;
         }
-    
+
         return true;
     }
 
-    public function stripe_checkout_success_shortcode() {
+    public function stripe_checkout_success_shortcode()
+    {
         // Check if the checkout was successful
         if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
             // Get session ID from URL parameters
             $session_id = isset($_GET['session_id']) ? sanitize_text_field($_GET['session_id']) : '';
-
             if (!empty($session_id)) {
                 // Retrieve session details from Stripe
                 try {
                     $this->init_stripe();
                     $session = \Stripe\Checkout\Session::retrieve($session_id);
 
-                    // Prepare email content
-                    $to = get_option('admin_email');
-                    $subject = 'New Successful Stripe Checkout';
-                    $message = $this->prepare_email_content($session);
-                    $headers = array('Content-Type: text/html; charset=UTF-8');
+                    // Check if the payment intent is less than 60 seconds old
+                    $current_time = time();
+                    $payment_intent_time = $session->created;
+                    $time_difference = $current_time - $payment_intent_time;
 
-                    // Send email
-                    $email_sent = wp_mail($to, $subject, $message, $headers);
-
-                    // Send GroupMe notification if enabled
-                    $groupme_sent = true;
-                    if (get_option('enable_groupme_notifications') == 1) {
-                        $groupme_bot_id = get_option('groupme_bot_id');
-                        $groupme_sent = $this->send_groupme_notification($session, $groupme_bot_id);
-                    }
-
-                    if ($email_sent && $groupme_sent) {
-                        return '<p>Thank you for your purchase! You will receive an email confirmation from Stripe.</p>';
+                    if ($time_difference <= 60) {
+                        // Prepare email content
+                        $to = get_option('admin_email');
+                        $subject = 'New Successful Stripe Checkout';
+                        $message = $this->prepare_email_content($session);
+                        $headers = array('Content-Type: text/html; charset=UTF-8');
+                        // Send email
+                        $email_sent = wp_mail($to, $subject, $message, $headers);
+                        // Send GroupMe notification if enabled
+                        $groupme_sent = true;
+                        if (get_option('enable_groupme_notifications') == 1) {
+                            $groupme_bot_id = get_option('groupme_bot_id');
+                            $groupme_sent = $this->send_groupme_notification($session, $groupme_bot_id);
+                        }
+                        if ($email_sent && $groupme_sent) {
+                            return '<p>Thank you for your purchase! You will receive an email confirmation from Stripe.</p>';
+                        } else {
+                            error_log('Failed to send admin notifications for Stripe Checkout session: ' . $session_id);
+                            return '<p>Thank you for your purchase! Your order has been received. If you do not receive a Stripe receipt via email, please let us know.</p>';
+                        }
                     } else {
-                        error_log('Failed to send admin notifications for Stripe Checkout session: ' . $session_id);
-                        return '<p>Thank you for your purchase! Your order has been received. You will receive an email confirmation from Stripe.</p>';
+                        // Payment intent is older than 60 seconds
+                        return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know. </p>';
                     }
                 } catch (\Exception $e) {
                     error_log('Error processing Stripe Checkout session: ' . $e->getMessage());
-                    $this->redirect_to_store();
+                    if (!is_user_logged_in()) {
+                        $this->redirect_to_store();
+                    } else {
+                        return '<p>There was an error processing your order. Please contact support.</p>';
+                    }
                 }
             } else {
-                $this->redirect_to_store();
+                if (!is_user_logged_in()) {
+                    $this->redirect_to_store();
+                } else {
+                    return '<p>Invalid session ID. Please try again or contact support.</p>';
+                }
             }
         } else {
-            $this->redirect_to_store();
+            if (!is_user_logged_in()) {
+                $this->redirect_to_store();
+            } else {
+                return '<p>Checkout was not successful. Please try again or contact support.</p>';
+            }
         }
     }
 
-    private function redirect_to_store() {
+    private function redirect_to_store()
+    {
         wp_redirect(home_url('/store'));
         exit;
     }
-    private function prepare_email_content($session) {
+    private function prepare_email_content($session)
+    {
         $customer = $session->customer_details;
         $line_items = $this->retrieve_line_items($session->id);
         $payment_intent = $session->payment_intent;
@@ -216,50 +242,35 @@ class StripeCheckoutIntegration
         </head>
         <body>
             <h2>New Successful Stripe Checkout</h2>
-            <p><strong>Customer:</strong> {$customer->name} ({$customer->email})</p>
+            <p><strong>Billed to:</strong> {$customer->name} ({$customer->email})</p>
             <p><strong>Subtotal:</strong> " . $this->format_amount($session->amount_subtotal, $session->currency) . "</p>
-            <p><strong>{$shipping_name}:</strong> " . $this->format_amount($shipping_cost, $session->currency) . "</p>
+            <p><strong>Shipping:</strong> " . $this->format_amount($shipping_cost, $session->currency) . "</p>
             <p><strong>Total Amount:</strong> " . $this->format_amount($session->amount_total, $session->currency) . "</p>
-            <p><strong>Stripe Payment Intent ID:</strong> <a href='https://dashboard.stripe.com/payments/{$payment_intent}'>{$payment_intent}</a></p>
-            <h3>Purchased Items:</h3>
-            <table>
-                <tr>
-                    <th>Product</th>
-                    <th>Quantity</th>
-                    <th>Price</th>
-                </tr>";
-
-        foreach ($line_items as $item) {
-            $content .= "
-                <tr>
-                    <td>{$item->description}</td>
-                    <td>{$item->quantity}</td>
-                    <td>" . $this->format_amount($item->amount_total, $session->currency) . "</td>
-                </tr>";
-        }
-
-        $content .= "
-            </table>
+            <p><strong>Stripe ID:</strong> <a href='https://dashboard.stripe.com/payments/{$payment_intent}'>{$payment_intent}</a></p>
         </body>
         </html>";
 
         return $content;
     }
 
-    private function retrieve_line_items($session_id) {
+    private function retrieve_line_items($session_id)
+    {
         return \Stripe\Checkout\Session::allLineItems($session_id);
     }
 
-    private function format_amount($amount, $currency) {
+    private function format_amount($amount, $currency)
+    {
         return number_format($amount / 100, 2) . ' ' . strtoupper($currency);
     }
 
-    private function get_stripe_secret_key() {
+    private function get_stripe_secret_key()
+    {
         $encrypted_key = get_option('stripe_secret_key_encrypted');
         return $this->decrypt($encrypted_key);
     }
 
-    public function register_settings() {
+    public function register_settings()
+    {
         register_setting('stripe_checkout_options', 'stripe_secret_key_encrypted', array($this, 'encrypt_api_key'));
         register_setting('stripe_checkout_options', 'stripe_shipping_rate_id');
         register_setting('stripe_checkout_options', 'stripe_enable_invoice_creation');
@@ -268,15 +279,18 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'enable_groupme_notifications');
     }
 
-    public function encrypt_api_key($value) {
+    public function encrypt_api_key($value)
+    {
         return $this->encrypt($value);
     }
 
-    public function add_settings_page() {
+    public function add_settings_page()
+    {
         add_options_page('Stripe Checkout Settings', 'Stripe Checkout', 'manage_options', 'stripe-checkout-settings', array($this, 'render_settings_page'));
     }
 
-    public function render_settings_page() {
+    public function render_settings_page()
+    {
         $decrypted_key = $this->get_stripe_secret_key();
         ?>
         <div class="wrap">
@@ -287,38 +301,46 @@ class StripeCheckoutIntegration
                 <table class="form-table">
                     <tr valign="top">
                         <th scope="row">Stripe Secret Key</th>
-                        <td><input type="password" name="stripe_secret_key_encrypted" value="<?php echo esc_attr($decrypted_key); ?>" /></td>
+                        <td><input type="password" name="stripe_secret_key_encrypted"
+                                value="<?php echo esc_attr($decrypted_key); ?>" /></td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Stripe Shipping Rate ID</th>
-                        <td><input type="text" name="stripe_shipping_rate_id" value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
+                        <td><input type="text" name="stripe_shipping_rate_id"
+                                value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Enable Invoice Creation</th>
                         <td>
                             <input type="checkbox" name="stripe_enable_invoice_creation" value="yes" <?php checked(get_option('stripe_enable_invoice_creation'), 'yes'); ?> />
-                            <span class="description">Check this box to automatically create invoices for successful payments</span>
+                            <span class="description">Check this box to automatically create invoices for successful
+                                payments</span>
                         </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Enable GroupMe Notifications</th>
                         <td>
                             <input type="checkbox" name="enable_groupme_notifications" value="1" <?php checked(get_option('enable_groupme_notifications'), 1); ?> />
-                            <span class="description">Check this box to send notifications to GroupMe for successful payments</span>
+                            <span class="description">Check this box to send notifications to GroupMe for successful
+                                payments</span>
                         </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">GroupMe Bot ID</th>
                         <td>
-                            <input type="text" name="groupme_bot_id" value="<?php echo esc_attr(get_option('groupme_bot_id')); ?>" />
-                            <p class="description">Enter your GroupMe Bot ID here. This is required for GroupMe notifications to work.</p>
+                            <input type="text" name="groupme_bot_id"
+                                value="<?php echo esc_attr(get_option('groupme_bot_id')); ?>" />
+                            <p class="description">Enter your GroupMe Bot ID here. This is required for GroupMe notifications to
+                                work.</p>
                         </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">GroupMe Group ID</th>
                         <td>
-                            <input type="text" name="groupme_group_id" value="<?php echo esc_attr(get_option('groupme_group_id')); ?>" />
-                            <p class="description">Enter your GroupMe Group ID here. This is required to send messages to a specific group.</p>
+                            <input type="text" name="groupme_group_id"
+                                value="<?php echo esc_attr(get_option('groupme_group_id')); ?>" />
+                            <p class="description">Enter your GroupMe Group ID here. This is required to send messages to a
+                                specific group.</p>
                         </td>
                     </tr>
                 </table>
@@ -328,7 +350,8 @@ class StripeCheckoutIntegration
         <?php
     }
 
-    public function fetch_shipping_rate_info() {
+    public function fetch_shipping_rate_info()
+    {
         if (!empty($this->shipping_rate_id)) {
             try {
                 $this->init_stripe();
@@ -343,16 +366,18 @@ class StripeCheckoutIntegration
             }
         }
     }
-    
 
-    private function init_stripe() {
+
+    private function init_stripe()
+    {
         $stripe_secret_key = $this->get_stripe_secret_key();
         if (!empty($stripe_secret_key)) {
             \Stripe\Stripe::setApiKey($stripe_secret_key);
         }
     }
 
-    public function fetch_stripe_products() {
+    public function fetch_stripe_products()
+    {
         try {
             $this->init_stripe();
             $products = \Stripe\Product::all([
@@ -361,7 +386,7 @@ class StripeCheckoutIntegration
                 'expand' => ['data.default_price']
             ]);
 
-            $formatted_products = array_filter(array_map(function($product) {
+            $formatted_products = array_filter(array_map(function ($product) {
                 // Check if the product has the metadata 'display' set to true
                 if (!isset($product->metadata['display']) || $product->metadata['display'] !== 'true') {
                     return null;
@@ -385,7 +410,7 @@ class StripeCheckoutIntegration
             $formatted_products = array_values(array_filter($formatted_products));
 
             // Sort products by price (smallest to largest)
-            usort($formatted_products, function($a, $b) {
+            usort($formatted_products, function ($a, $b) {
                 return $a['price'] - $b['price'];
             });
 
@@ -396,7 +421,8 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    public function get_stripe_product() {
+    public function get_stripe_product()
+    {
         if (!isset($_POST['product_id'])) {
             wp_send_json_error('No product ID provided');
         }
@@ -424,7 +450,8 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    public function create_checkout_session() {
+    public function create_checkout_session()
+    {
         if (!isset($_POST['cart'])) {
             wp_send_json_error('No cart data provided');
         }
@@ -472,7 +499,8 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    private function group_cart_items($cart) {
+    private function group_cart_items($cart)
+    {
         $grouped_cart = [];
         foreach ($cart as $item) {
             $key = $item['id'];
@@ -494,7 +522,8 @@ class StripeCheckoutIntegration
         return array_values($grouped_cart);
     }
 
-    public function stripe_checkout_shortcode() {
+    public function stripe_checkout_shortcode()
+    {
         ob_start();
         ?>
         <div id="stripe-checkout-container">
@@ -508,7 +537,8 @@ class StripeCheckoutIntegration
         return ob_get_clean();
     }
 
-    public function enqueue_scripts() {
+    public function enqueue_scripts()
+    {
         wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.4', true);
         wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
 
