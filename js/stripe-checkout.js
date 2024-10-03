@@ -48,7 +48,7 @@
                     <h3>${product.name}</h3>
                     <p class="product-description">${product.description || ''}</p>
                     <p class="product-price">${priceDisplay}</p>
-                    ${product.price ? `<button class="add-to-cart wp-block-button__link wp-element-button" data-product-id="${product.id}">Add to Cart</button>` : ''}
+                    ${product.price ? `<button class="add-to-cart btn btn-white" data-product-id="${product.id}">Add to Cart</button>` : ''}
                 </div>
             `);
         });
@@ -91,7 +91,7 @@
             const total = subtotal + shippingRate.amount;
             cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
         } else {
-            cartEl.append(`<div class="cart-shipping">Shipping: Calculated at checkout</div>`);
+            cartEl.append(`<div class="cart-shipping">Shipping: ${shippingRate.amount}</div>`);
         }
     }
 
