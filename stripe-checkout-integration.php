@@ -92,63 +92,41 @@ class StripeCheckoutIntegration
         return openssl_decrypt($encrypted_data, 'AES-256-CBC', $this->encryption_key, 0, $iv);
     }
 
-    private function send_groupme_notification($session, $bot_id)
-    {
+    function send_groupme_message($session) {
+        $bot_id = get_option('groupme_bot_id');
         if (empty($bot_id)) {
             error_log('GroupMe Bot ID is not set');
             return false;
         }
-
-        $group_id = get_option('groupme_group_id');
-        if (empty($group_id)) {
-            error_log('GroupMe Group ID is not set');
-            return false;
-        }
-
+    
         $customer = $session->customer_details;
-        $shipping_cost = isset($session->total_details->breakdown->shipping)
-            ? $session->total_details->breakdown->shipping->amount
-            : 0;
-
         $message = "New Stripe Order!\n";
         $message .= "Billed to: {$customer->name}\n";
         $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " " . strtoupper($session->currency) . "\n";
         $message .= "ID: {$session->payment_intent}\n";
-
-        $url = 'https://api.groupme.com/v3/groups/' . $group_id . '/messages';
+    
+        $url = 'https://api.groupme.com/v3/bots/post';
         $data = array(
-            'message' => array(
-                'source_guid' => 'STRIPE_CHECKOUT_' . time(),
-                'text' => $message,
-            )
+            'bot_id' => $bot_id,
+            'text' => $message,
         );
-
+    
         $options = array(
             'http' => array(
-                'header' => "Content-type: application/json\r\n" .
-                    "X-Access-Token: " . $bot_id . "\r\n",
+                'header' => "Content-type: application/json\r\n",
                 'method' => 'POST',
                 'content' => json_encode($data)
             )
         );
-
+    
         $context = stream_context_create($options);
-
-        // Use error suppression operator to catch warnings
-        $result = @file_get_contents($url, false, $context);
-
+        $result = file_get_contents($url, false, $context);
+    
         if ($result === FALSE) {
-            $error = error_get_last();
-            error_log('Error sending GroupMe message: ' . $error['message']);
-
-            // Log additional debug information
-            error_log('GroupMe API URL: ' . $url);
-            error_log('GroupMe request data: ' . print_r($data, true));
-            error_log('GroupMe API response: ' . print_r($http_response_header, true));
-
+            error_log('Failed to send GroupMe message');
             return false;
         }
-
+    
         return true;
     }
 
@@ -169,7 +147,7 @@ class StripeCheckoutIntegration
                     $payment_intent_time = $session->created;
                     $time_difference = $current_time - $payment_intent_time;
 
-                    if ($time_difference <= 60) {
+                    if ($time_difference <= 1800) {
                         // Prepare email content
                         $to = get_option('admin_email');
                         $subject = 'New Successful Stripe Checkout';
@@ -180,8 +158,7 @@ class StripeCheckoutIntegration
                         // Send GroupMe notification if enabled
                         $groupme_sent = true;
                         if (get_option('enable_groupme_notifications') == 1) {
-                            $groupme_bot_id = get_option('groupme_bot_id');
-                            $groupme_sent = $this->send_groupme_notification($session, $groupme_bot_id);
+                            $groupme_sent = $this->send_groupme_message($session);
                         }
                         if ($email_sent && $groupme_sent) {
                             return '<p>Thank you for your purchase! You will receive an email confirmation from Stripe.</p>';
@@ -219,7 +196,7 @@ class StripeCheckoutIntegration
 
     private function redirect_to_store()
     {
-        wp_redirect(home_url('/store'));
+        wp_redirect(home_url('/gcstore'));
         exit;
     }
     private function prepare_email_content($session)
@@ -491,12 +468,12 @@ class StripeCheckoutIntegration
                 'line_items' => $line_items,
                 'mode' => 'payment',
                 'success_url' => home_url('/success?checkout=success&session_id={CHECKOUT_SESSION_ID}'),
-                'cancel_url' => home_url('/store?checkout=cancelled'),
+                'cancel_url' => home_url('/gcstore?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
                 ],
                 'shipping_address_collection' => [
-                    'allowed_countries' => ['US', 'CA'],
+                    'allowed_countries' => ['US'],
                 ],
             ];
 
@@ -560,7 +537,7 @@ class StripeCheckoutIntegration
             <div id="product-list"></div>
             <h3>Cart</h3>
             <div id="cart"></div>
-            <button id="checkout-button" class="wp-block-button__link wp-element-button">Checkout</button>
+            <button id="checkout-button" class="btn btn-filled">Checkout</button>
         </div>
         <?php
         return ob_get_clean();
