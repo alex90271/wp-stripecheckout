@@ -4,7 +4,7 @@
         return;
     }
     
-    let cart = [];
+    let cart = {};
     let shippingRate = null;
 
     function fetchProducts() {
@@ -42,18 +42,20 @@
             
             const imageUrl = product.image || 'https://placehold.co/600x400/000000/FFFFFF.png';
 
+            const quantity = cart[product.id] ? cart[product.id].quantity : 0;
+            const buttonText = quantity > 0 ? `Add to Cart (${quantity})` : 'Add to Cart';
+
             productList.append(`
                 <div class="product-item">
                     <img src="${imageUrl}" alt="${product.name}" class="product-image">
                     <h3>${product.name}</h3>
                     <p class="product-description">${product.description || ''}</p>
                     <p class="product-price">${priceDisplay}</p>
-                    ${product.price ? `<button class="add-to-cart btn btn-white" data-product-id="${product.id}">Add to Cart</button>` : ''}
+                    ${product.price ? `<button class="add-to-cart btn btn-white" data-product-id="${product.id}">${buttonText}</button>` : ''}
                 </div>
             `);
         });
     }
-
 
     function formatPrice(amount, currency) {
         return new Intl.NumberFormat('en-US', {
@@ -66,9 +68,8 @@
         const cartEl = $('#cart');
         cartEl.empty();
         let subtotal = 0;
-        let groupedCart = groupCartItems(cart);
 
-        groupedCart.forEach(item => {
+        Object.values(cart).forEach(item => {
             subtotal += item.price * item.quantity;
             cartEl.append(`
                 <div class="cart-item">
@@ -91,20 +92,15 @@
             const total = subtotal + shippingRate.amount;
             cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
         } else {
-            cartEl.append(`<div class="cart-shipping">Shipping: ${shippingRate.amount}</div>`);
+            cartEl.append(`<div class="cart-shipping">Shipping: Not calculated</div>`);
         }
-    }
 
-    function groupCartItems(cart) {
-        let groupedCart = {};
-        cart.forEach(item => {
-            if (groupedCart[item.id]) {
-                groupedCart[item.id].quantity += 1;
-            } else {
-                groupedCart[item.id] = { ...item, quantity: 1 };
-            }
+        // Update all "Add to Cart" buttons
+        $('.add-to-cart').each(function() {
+            const productId = $(this).data('product-id');
+            const quantity = cart[productId] ? cart[productId].quantity : 0;
+            $(this).text(quantity > 0 ? `Add to Cart (${quantity})` : 'Add to Cart');
         });
-        return Object.values(groupedCart);
     }
 
     function initShippingRate() {
@@ -124,7 +120,11 @@
             },
             success: function(response) {
                 if (response.success) {
-                    cart.push(response.data);
+                    if (cart[productId]) {
+                        cart[productId].quantity += 1;
+                    } else {
+                        cart[productId] = { ...response.data, quantity: 1 };
+                    }
                     updateCart();
                 } else {
                     console.error('Error adding product to cart:', response.data);
@@ -135,11 +135,14 @@
 
     $(document).on('click', '.remove-from-cart', function() {
         const productId = $(this).data('product-id');
-        const index = cart.findIndex(item => item.id === productId);
-        if (index !== -1) {
-            cart.splice(index, 1);
+        if (cart[productId]) {
+            if (cart[productId].quantity > 1) {
+                cart[productId].quantity -= 1;
+            } else {
+                delete cart[productId];
+            }
+            updateCart();
         }
-        updateCart();
     });
 
     $('#checkout-button').on('click', function() {
@@ -148,7 +151,7 @@
             type: 'POST',
             data: {
                 action: 'create_checkout_session',
-                cart: JSON.stringify(cart)
+                cart: JSON.stringify(Object.values(cart))
             },
             success: function(response) {
                 if (response.success) {
