@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Simple Stripe Checkout
  * Description: Integrates Stripe Checkout Sessions with WordPress, using products and shipping ID from Stripe.
- * Version: 1.4
+ * Version: 1.5
  * Author: Alex Alder
  */
 
@@ -13,6 +13,9 @@ if (!defined('ABSPATH')) {
 // Include Stripe PHP library
 require_once(plugin_dir_path(__FILE__) . 'stripe-php/init.php');
 
+//Start webhooks
+require_once(plugin_dir_path(__FILE__) . 'stripe-webhook.php');
+
 class StripeCheckoutIntegration
 {
     private $shipping_rate_id;
@@ -20,6 +23,8 @@ class StripeCheckoutIntegration
     private $enable_invoice_creation;
     private $encryption_key;
     private $product_ids;
+    private $webhook_handler;
+
 
     public function __construct()
     {
@@ -31,9 +36,12 @@ class StripeCheckoutIntegration
         $this->shipping_rate_info = null;
         $this->enable_invoice_creation = get_option('stripe_enable_invoice_creation', 'no');
         $this->product_ids = get_option('stripe_product_ids', '');
+        $this->webhook_handler = new StripeWebhookHandler($this);
 
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_menu', array($this, 'add_settings_page'));
+        add_action('rest_api_init', array($this->webhook_handler, 'register_webhook_endpoint'));
+
 
         // Register shortcode
         add_shortcode('stripe-checkout', array($this, 'stripe_checkout_shortcode'));
@@ -92,144 +100,14 @@ class StripeCheckoutIntegration
         return openssl_decrypt($encrypted_data, 'AES-256-CBC', $this->encryption_key, 0, $iv);
     }
 
-    function send_groupme_message($session) {
-        $bot_id = get_option('groupme_bot_id');
-        if (empty($bot_id)) {
-            error_log('GroupMe Bot ID is not set');
-            return false;
-        }
-    
-        $customer = $session->customer_details;
-        $message = "New Stripe Order!\n";
-        $message .= "Billed to: {$customer->name}\n";
-        $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " " . strtoupper($session->currency) . "\n";
-        $message .= "ID: {$session->payment_intent}\n";
-    
-        $url = 'https://api.groupme.com/v3/bots/post';
-        $data = array(
-            'bot_id' => $bot_id,
-            'text' => $message,
-        );
-    
-        $options = array(
-            'http' => array(
-                'header' => "Content-type: application/json\r\n",
-                'method' => 'POST',
-                'content' => json_encode($data)
-            )
-        );
-    
-        $context = stream_context_create($options);
-        $result = file_get_contents($url, false, $context);
-    
-        if ($result === FALSE) {
-            error_log('Failed to send GroupMe message');
-            return false;
-        }
-    
-        return true;
-    }
-
     public function stripe_checkout_success_shortcode()
     {
         // Check if the checkout was successful
         if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
-            // Get session ID from URL parameters
-            $session_id = isset($_GET['session_id']) ? sanitize_text_field($_GET['session_id']) : '';
-            if (!empty($session_id)) {
-                // Retrieve session details from Stripe
-                try {
-                    $this->init_stripe();
-                    $session = \Stripe\Checkout\Session::retrieve($session_id);
-
-                    // Check if the payment intent is less than 60 seconds old
-                    $current_time = time();
-                    $payment_intent_time = $session->created;
-                    $time_difference = $current_time - $payment_intent_time;
-
-                    if ($time_difference <= 1800) {
-                        // Prepare email content
-                        $to = get_option('admin_email');
-                        $subject = 'New Successful Stripe Checkout';
-                        $message = $this->prepare_email_content($session);
-                        $headers = array('Content-Type: text/html; charset=UTF-8');
-                        // Send email
-                        $email_sent = wp_mail($to, $subject, $message, $headers);
-                        // Send GroupMe notification if enabled
-                        $groupme_sent = true;
-                        if (get_option('enable_groupme_notifications') == 1) {
-                            $groupme_sent = $this->send_groupme_message($session);
-                        }
-                        if ($email_sent && $groupme_sent) {
-                            return '<p>Thank you for your purchase! You will receive an email confirmation from Stripe.</p>';
-                        } else {
-                            error_log('Failed to send admin notifications for Stripe Checkout session: ' . $session_id);
-                            return '<p>Thank you for your purchase! Your order has been received. If you do not receive a Stripe receipt via email, please let us know.</p>';
-                        }
-                    } else {
-                        // Payment intent is older than 60 seconds
-                        return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know. </p>';
-                    }
-                } catch (\Exception $e) {
-                    error_log('Error processing Stripe Checkout session: ' . $e->getMessage());
-                    if (!is_user_logged_in()) {
-                        $this->redirect_to_store();
-                    } else {
-                        return '<p>Invalid request. Please contact support.</p>';
-                    }
-                }
-            } else {
-                if (!is_user_logged_in()) {
-                    $this->redirect_to_store();
-                } else {
-                    return '<p>Invalid request. Please contact support.</p>';
-                }
-            }
+            return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know. </p>';
         } else {
-            if (!is_user_logged_in()) {
-                $this->redirect_to_store();
-            } else {
-                return '<p>Invalid request. Please contact support.</p>';
-            }
+            return '<p>Invalid request. Please contact support.</p>';
         }
-    }
-
-    private function redirect_to_store()
-    {
-        wp_redirect(home_url('/gcstore'));
-        exit;
-    }
-    private function prepare_email_content($session)
-    {
-        $customer = $session->customer_details;
-        $line_items = $this->retrieve_line_items($session->id);
-        $payment_intent = $session->payment_intent;
-
-        // Use the existing shipping rate info
-        $shipping_cost = $this->shipping_rate_info ? $this->shipping_rate_info['amount'] : 0;
-        $shipping_name = $this->shipping_rate_info ? $this->shipping_rate_info['display_name'] : 'Shipping';
-
-        $content = "
-        <html>
-        <head>
-            <style>
-                body { font-family: Arial, sans-serif; }
-                table { border-collapse: collapse; width: 100%; }
-                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                th { background-color: #f2f2f2; }
-            </style>
-        </head>
-        <body>
-            <h2>New Successful Stripe Checkout</h2>
-            <p><strong>Billed to:</strong> {$customer->name} ({$customer->email})</p>
-            <p><strong>Subtotal:</strong> " . $this->format_amount($session->amount_subtotal, $session->currency) . "</p>
-            <p><strong>Shipping:</strong> " . $this->format_amount($shipping_cost, $session->currency) . "</p>
-            <p><strong>Total Amount:</strong> " . $this->format_amount($session->amount_total, $session->currency) . "</p>
-            <p><strong>Stripe ID:</strong> <a href='https://dashboard.stripe.com/payments/{$payment_intent}'>{$payment_intent}</a></p>
-        </body>
-        </html>";
-
-        return $content;
     }
 
     private function retrieve_line_items($session_id)
@@ -258,6 +136,7 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_product_ids');
         register_setting('stripe_checkout_options', 'stripe_disable_store');
         register_setting('stripe_checkout_options', 'stripe_store_disabled_message');
+        register_setting('stripe_checkout_options', 'stripe_webhook_secret_encrypted', array($this, 'encrypt_api_key'));
 
     }
 
@@ -285,6 +164,15 @@ class StripeCheckoutIntegration
                         <th scope="row">Stripe Secret Key</th>
                         <td><input type="password" name="stripe_secret_key_encrypted"
                                 value="<?php echo esc_attr($decrypted_key); ?>" /></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Stripe Webhook Secret</th>
+                        <td>
+                            <input type="password" name="stripe_webhook_secret_encrypted"
+                                value="<?php echo esc_attr($this->decrypt(get_option('stripe_webhook_secret_encrypted'))); ?>" />
+                            <p class="description">Enter your Stripe Webhook Secret here. This is required for secure webhook
+                                processing.</p>
+                        </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Stripe Shipping Rate ID</th>
@@ -372,6 +260,11 @@ class StripeCheckoutIntegration
         }
     }
 
+    public function get_webhook_secret()
+    {
+        $encrypted_secret = get_option('stripe_webhook_secret_encrypted');
+        return $this->decrypt($encrypted_secret);
+    }
 
     private function init_stripe()
     {
@@ -467,7 +360,7 @@ class StripeCheckoutIntegration
                 'payment_method_types' => ['card'],
                 'line_items' => $line_items,
                 'mode' => 'payment',
-                'success_url' => home_url('/success?checkout=success&session_id={CHECKOUT_SESSION_ID}'),
+                'success_url' => home_url('/success?checkout=success'),
                 'cancel_url' => home_url('/gcstore?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
