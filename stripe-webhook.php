@@ -26,6 +26,7 @@ class StripeWebhookHandler {
     {
         $customer = $session->customer_details;
         $payment_intent = $session->payment_intent;
+        $date = date(format: 'm/d/Y g:ia', timestamp: $session->created);
 
         $content = "
         <html>
@@ -39,8 +40,9 @@ class StripeWebhookHandler {
         </head>
         <body>
             <h2>New Successful Stripe Checkout</h2>
+            <p><strong>Order Date:</strong> {$date} </p> {
             <p><strong>Billed to:</strong> {$customer->name} ({$customer->email})</p>
-            <p><strong>Total Amount:</strong> " . $session->amount_total . "</p>
+            <p><strong>Total Amount:</strong> " . number_format($session->amount_total / 100, 2) . "</p>
             <p><strong>Stripe ID:</strong> <a href='https://dashboard.stripe.com/payments/{$payment_intent}'>{$payment_intent}</a></p>
         </body>
         </html>";
@@ -56,10 +58,11 @@ class StripeWebhookHandler {
             return false;
         }
 
-        $customer = $session->customer_details;
-        $message = "New Stripe Order!\n";
-        $message .= "Billed to: {$customer->name}\n";
-        $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " " . strtoupper($session->currency) . "\n";
+        $date = date(format: 'm/d/Y g:ia', timestamp: $session->created);
+        
+        $message = "New Order!\n";
+        $message .= "Date: {$date}\n";
+        $message .= "Total Amount: " . number_format($session->amount_total / 100, 2) . " \n";
         $message .= "ID: {$session->payment_intent}\n";
 
         $url = 'https://api.groupme.com/v3/bots/post';
