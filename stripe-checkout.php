@@ -41,6 +41,7 @@ class StripeCheckoutIntegration
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_menu', array($this, 'add_settings_page'));
         add_action('rest_api_init', array($this->webhook_handler, 'register_webhook_endpoint'));
+        add_action('admin_init', array($this, 'handle_clear_cache_button'));
 
 
         // Register shortcode
@@ -58,9 +59,6 @@ class StripeCheckoutIntegration
         add_action('wp_ajax_nopriv_get_stripe_product', array($this, 'get_stripe_product'));
         add_action('wp_ajax_create_checkout_session', array($this, 'create_checkout_session'));
         add_action('wp_ajax_nopriv_create_checkout_session', array($this, 'create_checkout_session'));
-
-        // Fetch shipping rate info on init
-        add_action('init', array($this, 'fetch_shipping_rate_info'));
     }
 
     private function get_encryption_key()
@@ -137,7 +135,6 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_disable_store');
         register_setting('stripe_checkout_options', 'stripe_store_disabled_message');
         register_setting('stripe_checkout_options', 'stripe_webhook_secret_encrypted', array($this, 'encrypt_api_key'));
-
     }
 
     public function encrypt_api_key($value)
@@ -239,24 +236,50 @@ class StripeCheckoutIntegration
                 </table>
                 <?php submit_button(); ?>
             </form>
+            <h2>Cache Management</h2>
+            <form method="post" action="">
+                <?php wp_nonce_field('clear_stripe_cache_nonce'); ?>
+                <p>
+                    <input type="submit" name="clear_stripe_cache" class="button button-secondary" value="Clear Stripe Cache">
+                    <span class="description">Click this button to clear the Stripe products and image cache</span>
+                </p>
+            </form>
         </div>
         <?php
+    }
+
+    public function handle_clear_cache_button() {
+        if (isset($_POST['clear_stripe_cache']) && check_admin_referer('clear_stripe_cache_nonce')) {
+            $this->clear_stripe_cache();
+            add_settings_error('stripe_checkout_options', 'cache_cleared', 'Stripe cache has been cleared successfully.', 'updated');
+        }
     }
 
     public function fetch_shipping_rate_info()
     {
         if (!empty($this->shipping_rate_id)) {
-            try {
-                $this->init_stripe();
-                $shipping_rate = \Stripe\ShippingRate::retrieve($this->shipping_rate_id);
-                $this->shipping_rate_info = [
-                    'amount' => $shipping_rate->fixed_amount->amount,
-                    'currency' => $shipping_rate->fixed_amount->currency,
-                    'display_name' => $shipping_rate->display_name
-                ];
-            } catch (\Exception $e) {
-                error_log('Error fetching shipping rate: ' . $e->getMessage());
+            $cache_key = 'stripe_shipping_rate_info';
+            $cached_info = get_transient($cache_key);
+    
+            if ($cached_info !== false) {
+                $this->shipping_rate_info = $cached_info;
+            } else {
+                try {
+                    $this->init_stripe();
+                    $shipping_rate = \Stripe\ShippingRate::retrieve($this->shipping_rate_id);
+                    $this->shipping_rate_info = [
+                        'amount' => $shipping_rate->fixed_amount->amount,
+                        'currency' => $shipping_rate->fixed_amount->currency,
+                        'display_name' => $shipping_rate->display_name
+                    ];
+                    set_transient($cache_key, $this->shipping_rate_info, 3600); // Cache for 1 hour
+                } catch (\Exception $e) {
+                    error_log('Error fetching shipping rate: ' . $e->getMessage());
+                    $this->shipping_rate_info = null;
+                }
             }
+        } else {
+            $this->shipping_rate_info = null;
         }
     }
 
@@ -276,6 +299,17 @@ class StripeCheckoutIntegration
 
     public function fetch_stripe_products()
     {
+        $cache_key = 'stripe_products_cache';
+        $cache_expiration = 3600; // Cache for 1 hour
+
+        // Try to get cached products
+        $cached_products = get_transient($cache_key);
+
+        if ($cached_products !== false) {
+            wp_send_json_success($cached_products);
+            return;
+        }
+
         try {
             $this->init_stripe();
             $product_ids = array_filter(array_map('trim', explode("\n", $this->product_ids)));
@@ -293,13 +327,16 @@ class StripeCheckoutIntegration
                     'expand' => ['default_price']
                 ]);
 
+                $image_url = $product->images[0] ?? null;
+                $cached_image_url = $this->cache_image($image_url);
+
                 $formatted_products[] = [
                     'id' => $product->id,
                     'name' => $product->name,
                     'description' => $product->description,
                     'price' => $product->default_price ? $product->default_price->unit_amount : null,
                     'currency' => $product->default_price ? $product->default_price->currency : null,
-                    'image' => $product->images[0] ?? null
+                    'image' => $cached_image_url
                 ];
             }
 
@@ -308,6 +345,9 @@ class StripeCheckoutIntegration
                 return $a['price'] - $b['price'];
             });
 
+            // Cache the formatted products
+            set_transient($cache_key, $formatted_products, $cache_expiration);
+
             wp_send_json_success($formatted_products);
         } catch (\Exception $e) {
             wp_send_json_error($e->getMessage());
@@ -315,6 +355,51 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
+    private function cache_image($image_url)
+    {
+        if (empty($image_url)) {
+            return null;
+        }
+
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/stripe-product-images';
+        wp_mkdir_p($cache_dir);
+
+        $file_name = basename($image_url);
+        $cached_file_path = $cache_dir . '/' . $file_name;
+        $cached_file_url = $upload_dir['baseurl'] . '/stripe-product-images/' . $file_name;
+
+        if (!file_exists($cached_file_path)) {
+            $image_data = file_get_contents($image_url);
+            if ($image_data !== false) {
+                file_put_contents($cached_file_path, $image_data);
+            } else {
+                return $image_url; // Return original URL if download fails
+            }
+        }
+
+        return $cached_file_url;
+    }
+
+    public function clear_stripe_cache() {
+        delete_transient('stripe_products_cache');
+        delete_transient('stripe_shipping_rate_info');
+        
+        // Clear image cache
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/stripe-product-images';
+        
+        if (is_dir($cache_dir)) {
+            $files = glob($cache_dir . '/*');
+            foreach ($files as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+        }
+        
+        return true;
+    }
     public function get_stripe_product()
     {
         if (!isset($_POST['product_id'])) {
@@ -323,6 +408,24 @@ class StripeCheckoutIntegration
 
         $product_id = sanitize_text_field($_POST['product_id']);
 
+        // Try to get the product from cache
+        $cache_key = 'stripe_products_cache';
+        $cached_products = get_transient($cache_key);
+
+        if ($cached_products !== false) {
+            // If we have cached products, search for the requested product
+            $cached_product = array_filter($cached_products, function ($product) use ($product_id) {
+                return $product['id'] === $product_id;
+            });
+
+            if (!empty($cached_product)) {
+                // Product found in cache, return it
+                wp_send_json_success(reset($cached_product));
+                return;
+            }
+        }
+
+        // If not in cache, fetch from Stripe API
         try {
             $this->init_stripe();
             $product = \Stripe\Product::retrieve([
@@ -336,6 +439,15 @@ class StripeCheckoutIntegration
                 'description' => $product->description,
                 'price' => $product->default_price->unit_amount,
             ];
+
+            // If we have a cached products array, update it with this product
+            if ($cached_products !== false) {
+                $cached_products = array_filter($cached_products, function ($p) use ($product_id) {
+                    return $p['id'] !== $product_id;
+                });
+                $cached_products[] = $product_data;
+                set_transient($cache_key, $cached_products, 3600); // Update cache for 1 hour
+            }
 
             wp_send_json_success($product_data);
         } catch (\Exception $e) {
@@ -438,15 +550,23 @@ class StripeCheckoutIntegration
 
     public function enqueue_scripts()
     {
-        wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.4', true);
-        wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
-
-        wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'shipping_rate_id' => $this->shipping_rate_id,
-            'shipping_rate_info' => $this->shipping_rate_info,
-            'store_disabled' => get_option('stripe_disable_store', 0)
-        ));
+        global $post;
+        
+        // Only enqueue scripts and localize data if the shortcode is present
+        if (is_a($post, 'WP_Post') && has_shortcode($post->post_content, 'stripe-checkout')) {
+            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.6', true);
+            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
+    
+            // Fetch shipping rate info
+            $this->fetch_shipping_rate_info();
+    
+            wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'shipping_rate_id' => $this->shipping_rate_id,
+                'shipping_rate_info' => $this->shipping_rate_info,
+                'store_disabled' => get_option('stripe_disable_store', 0)
+            ));
+        }
     }
 }
 
