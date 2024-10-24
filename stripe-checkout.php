@@ -446,7 +446,7 @@ class StripeCheckoutIntegration
                     return $p['id'] !== $product_id;
                 });
                 $cached_products[] = $product_data;
-                set_transient($cache_key, $cached_products, 3600); // Update cache for 1 hour
+                set_transient($cache_key, $cached_products, 86400); // Update cache for 24 hour
             }
 
             wp_send_json_success($product_data);
