@@ -40,7 +40,7 @@ class StripeWebhookHandler {
         </head>
         <body>
             <h2>New Successful Stripe Checkout</h2>
-            <p><strong>Order Date:</strong> {$date} </p> {
+            <p><strong>Order Date:</strong> {$date} </p>
             <p><strong>Billed to:</strong> {$customer->name} ({$customer->email})</p>
             <p><strong>Total Amount:</strong> " . number_format($session->amount_total / 100, 2) . "</p>
             <p><strong>Stripe ID:</strong> <a href='https://dashboard.stripe.com/payments/{$payment_intent}'>{$payment_intent}</a></p>
