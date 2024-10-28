@@ -135,6 +135,8 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_disable_store');
         register_setting('stripe_checkout_options', 'stripe_store_disabled_message');
         register_setting('stripe_checkout_options', 'stripe_webhook_secret_encrypted', array($this, 'encrypt_api_key'));
+        register_setting('stripe_checkout_options', 'stripe_timezone');
+
     }
 
     public function encrypt_api_key($value)
@@ -175,6 +177,26 @@ class StripeCheckoutIntegration
                         <th scope="row">Stripe Shipping Rate ID</th>
                         <td><input type="text" name="stripe_shipping_rate_id"
                                 value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Email Timezone</th>
+                        <td>
+                            <select name="stripe_timezone">
+                                <?php
+                                $current_timezone = get_option('stripe_timezone', 'America/Denver');
+                                $timezones = DateTimeZone::listIdentifiers(DateTimeZone::ALL);
+                                foreach ($timezones as $timezone) {
+                                    printf(
+                                        '<option value="%s" %s>%s</option>',
+                                        esc_attr($timezone),
+                                        selected($timezone, $current_timezone, false),
+                                        esc_html($timezone)
+                                    );
+                                }
+                                ?>
+                            </select>
+                            <p class="description">Select the timezone for email notifications and GroupMe messages.</p>
+                        </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Product IDs</th>
@@ -248,7 +270,8 @@ class StripeCheckoutIntegration
         <?php
     }
 
-    public function handle_clear_cache_button() {
+    public function handle_clear_cache_button()
+    {
         if (isset($_POST['clear_stripe_cache']) && check_admin_referer('clear_stripe_cache_nonce')) {
             $this->clear_stripe_cache();
             add_settings_error('stripe_checkout_options', 'cache_cleared', 'Stripe cache has been cleared successfully.', 'updated');
@@ -260,7 +283,7 @@ class StripeCheckoutIntegration
         if (!empty($this->shipping_rate_id)) {
             $cache_key = 'stripe_shipping_rate_info';
             $cached_info = get_transient($cache_key);
-    
+
             if ($cached_info !== false) {
                 $this->shipping_rate_info = $cached_info;
             } else {
@@ -381,14 +404,15 @@ class StripeCheckoutIntegration
         return $cached_file_url;
     }
 
-    public function clear_stripe_cache() {
+    public function clear_stripe_cache()
+    {
         delete_transient('stripe_products_cache');
         delete_transient('stripe_shipping_rate_info');
-        
+
         // Clear image cache
         $upload_dir = wp_upload_dir();
         $cache_dir = $upload_dir['basedir'] . '/stripe-product-images';
-        
+
         if (is_dir($cache_dir)) {
             $files = glob($cache_dir . '/*');
             foreach ($files as $file) {
@@ -397,7 +421,7 @@ class StripeCheckoutIntegration
                 }
             }
         }
-        
+
         return true;
     }
     public function get_stripe_product()
@@ -551,15 +575,15 @@ class StripeCheckoutIntegration
     public function enqueue_scripts()
     {
         global $post;
-        
+
         // Only enqueue scripts and localize data if the shortcode is present
         if (is_a($post, 'WP_Post') && has_shortcode($post->post_content, 'stripe-checkout')) {
             wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.6', true);
             wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
-    
+
             // Fetch shipping rate info
             $this->fetch_shipping_rate_info();
-    
+
             wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'shipping_rate_id' => $this->shipping_rate_id,
