@@ -158,26 +158,68 @@ class StripeCheckoutIntegration
             <form method="post" action="options.php">
                 <?php settings_fields('stripe_checkout_options'); ?>
                 <?php do_settings_sections('stripe_checkout_options'); ?>
+
+                <h2>Stripe API Configuration</h2>
                 <table class="form-table">
                     <tr valign="top">
-                        <th scope="row">Stripe Secret Key</th>
+                        <th scope="row">Stripe Restricted Key</th>
                         <td><input type="password" name="stripe_secret_key_encrypted"
-                                value="<?php echo esc_attr($decrypted_key); ?>" /></td>
+                                value="<?php echo esc_attr($decrypted_key); ?>" />
+                                <p class="description">Please use a restricted API key<br><strong>Note: </strong>Key must have the following permissions: <i>Read Products; Write Checkout Sessions; Invoices Write</i></p></td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Stripe Webhook Secret</th>
                         <td>
                             <input type="password" name="stripe_webhook_secret_encrypted"
                                 value="<?php echo esc_attr($this->decrypt(get_option('stripe_webhook_secret_encrypted'))); ?>" />
-                            <p class="description">Enter your Stripe Webhook Secret here. This is required for secure webhook
-                                processing.</p>
+                            <p class="description">This is required to get admin notification emails and groupme messages<br><strong>Note: </strong>This does not affect the send receipt setting in stripe dashboard</p>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2>Store Configuration</h2>
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Product IDs</th>
+                        <td>
+                            <textarea name="stripe_product_ids" rows="5"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_product_ids')); ?></textarea>
+                            <p class="description">Enter Stripe product IDs, one per line, to be displayed on the frontend.</p>
                         </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Stripe Shipping Rate ID</th>
                         <td><input type="text" name="stripe_shipping_rate_id"
-                                value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" /></td>
+                                value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" />
+                                <p class="description">If left blank, shipping rate will display as $0.00<p></td>
                     </tr>
+                    <tr valign="top">
+                        <th scope="row">Enable Invoice Creation</th>
+                        <td>
+                            <input type="checkbox" name="stripe_enable_invoice_creation" value="yes" <?php checked(get_option('stripe_enable_invoice_creation'), 'yes'); ?> />
+                            <span class="description">Automatically create invoices for successful
+                                payments (Stripe may charge additonal to generate invoices)</span>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Disable Store</th>
+                        <td>
+                            <input type="checkbox" name="stripe_disable_store" value="1" <?php checked(get_option('stripe_disable_store'), 1); ?> />
+                            <span class="description">Disable the store and display the message entered below</span>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Store Disabled Message</th>
+                        <td>
+                            <textarea name="stripe_store_disabled_message" rows="5"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_store_disabled_message')); ?></textarea>
+                            <p class="description">Enter the message to display when the store is disabled</p>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2>Notification Settings</h2>
+                <table class="form-table">
                     <tr valign="top">
                         <th scope="row">Email Timezone</th>
                         <td>
@@ -198,42 +240,15 @@ class StripeCheckoutIntegration
                             <p class="description">Select the timezone for email notifications and GroupMe messages.</p>
                         </td>
                     </tr>
-                    <tr valign="top">
-                        <th scope="row">Product IDs</th>
-                        <td>
-                            <textarea name="stripe_product_ids" rows="5"
-                                cols="50"><?php echo esc_textarea(get_option('stripe_product_ids')); ?></textarea>
-                            <p class="description">Enter Stripe product IDs, one per line, to be displayed on the frontend.</p>
-                        </td>
-                    </tr>
-                    <tr valign="top">
-                        <th scope="row">Disable Store</th>
-                        <td>
-                            <input type="checkbox" name="stripe_disable_store" value="1" <?php checked(get_option('stripe_disable_store'), 1); ?> />
-                            <span class="description">Check this box to disable the store and display a custom message</span>
-                        </td>
-                    </tr>
-                    <tr valign="top">
-                        <th scope="row">Store Disabled Message</th>
-                        <td>
-                            <textarea name="stripe_store_disabled_message" rows="5"
-                                cols="50"><?php echo esc_textarea(get_option('stripe_store_disabled_message')); ?></textarea>
-                            <p class="description">Enter the message to display when the store is disabled</p>
-                        </td>
-                    </tr>
-                    <tr valign="top">
-                        <th scope="row">Enable Invoice Creation</th>
-                        <td>
-                            <input type="checkbox" name="stripe_enable_invoice_creation" value="yes" <?php checked(get_option('stripe_enable_invoice_creation'), 'yes'); ?> />
-                            <span class="description">Check this box to automatically create invoices for successful
-                                payments</span>
-                        </td>
-                    </tr>
+                </table>
+
+                <h2>GroupMe Integration</h2>
+                <table class="form-table">
                     <tr valign="top">
                         <th scope="row">Enable GroupMe Notifications</th>
                         <td>
                             <input type="checkbox" name="enable_groupme_notifications" value="1" <?php checked(get_option('enable_groupme_notifications'), 1); ?> />
-                            <span class="description">Check this box to send notifications to GroupMe for successful
+                            <span class="description">Send notifications to GroupMe for successful
                                 payments</span>
                         </td>
                     </tr>
@@ -258,12 +273,14 @@ class StripeCheckoutIntegration
                 </table>
                 <?php submit_button(); ?>
             </form>
+
             <h2>Cache Management</h2>
             <form method="post" action="">
                 <?php wp_nonce_field('clear_stripe_cache_nonce'); ?>
                 <p>
+                    <span class="description">Manually clear products and image cache. Cache automatically refreshes every 72
+                        hours<br></span>
                     <input type="submit" name="clear_stripe_cache" class="button button-secondary" value="Clear Stripe Cache">
-                    <span class="description">Click this button to clear the Stripe products and image cache</span>
                 </p>
             </form>
         </div>
