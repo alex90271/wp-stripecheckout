@@ -295,7 +295,7 @@ class StripeCheckoutIntegration
                         'currency' => $shipping_rate->fixed_amount->currency,
                         'display_name' => $shipping_rate->display_name
                     ];
-                    set_transient($cache_key, $this->shipping_rate_info, 3600); // Cache for 1 hour
+                    set_transient($cache_key, $this->shipping_rate_info, 259200); // Cache for 1 hour
                 } catch (\Exception $e) {
                     error_log('Error fetching shipping rate: ' . $e->getMessage());
                     $this->shipping_rate_info = null;
@@ -323,7 +323,7 @@ class StripeCheckoutIntegration
     public function fetch_stripe_products()
     {
         $cache_key = 'stripe_products_cache';
-        $cache_expiration = 3600; // Cache for 1 hour
+        $cache_expiration = 259200; // Cache for 1 hour
 
         // Try to get cached products
         $cached_products = get_transient($cache_key);
