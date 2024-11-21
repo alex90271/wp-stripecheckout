@@ -165,14 +165,18 @@ class StripeCheckoutIntegration
                         <th scope="row">Stripe Restricted Key</th>
                         <td><input type="password" name="stripe_secret_key_encrypted"
                                 value="<?php echo esc_attr($decrypted_key); ?>" />
-                                <p class="description">Please use a restricted API key<br><strong>Note: </strong>Key must have the following permissions: <i>Read Products; Write Checkout Sessions; Invoices Write</i></p></td>
+                            <p class="description">Please use a restricted API key<br><strong>Note: </strong>Key must have the
+                                following permissions: <i>Read Products; Write Checkout Sessions; Invoices Write</i></p>
+                        </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Stripe Webhook Secret</th>
                         <td>
                             <input type="password" name="stripe_webhook_secret_encrypted"
                                 value="<?php echo esc_attr($this->decrypt(get_option('stripe_webhook_secret_encrypted'))); ?>" />
-                            <p class="description">This is required to get admin notification emails and groupme messages<br><strong>Note: </strong>This does not affect the send receipt setting in stripe dashboard</p>
+                            <p class="description">This is required to get admin notification emails and groupme
+                                messages<br><strong>Note: </strong>This does not affect the send receipt setting in stripe
+                                dashboard</p>
                         </td>
                     </tr>
                 </table>
@@ -191,7 +195,9 @@ class StripeCheckoutIntegration
                         <th scope="row">Stripe Shipping Rate ID</th>
                         <td><input type="text" name="stripe_shipping_rate_id"
                                 value="<?php echo esc_attr(get_option('stripe_shipping_rate_id')); ?>" />
-                                <p class="description">If left blank, shipping rate will display as $0.00<p></td>
+                            <p class="description">If left blank, shipping rate will display as $0.00
+                            <p>
+                        </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">Enable Invoice Creation</th>
@@ -510,13 +516,30 @@ class StripeCheckoutIntegration
             $line_items = $this->group_cart_items($cart);
 
             $session_params = [
-                'payment_method_types' => ['card'],
                 'line_items' => $line_items,
                 'mode' => 'payment',
                 'success_url' => home_url('/success?checkout=success'),
                 'cancel_url' => home_url('/gcstore?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
+                ],
+                'consent_collection' => [
+                    'terms_of_service' => 'required',
+                ],
+                'custom_text' => [
+                    'shipping_address' => [
+                        'message' => 'A receipt will be sent to the email address listed above'
+                    ],
+                    'terms_of_service_acceptance' => [
+                        'message' => 'I agree to the '. get_bloginfo('name').' terms of service located at '. get_site_url() .''
+                    ],
+                    'submit' => [
+                        'message' => 'Orders are shipped the next buisness day via USPS. Please allow 5-10 days'
+                    ],
+                ],
+                "submit_type" => 'pay',
+                'payment_intent_data' => [
+                    'description' => implode(",", $line_items),
                 ],
                 'shipping_address_collection' => [
                     'allowed_countries' => ['US'],
@@ -578,12 +601,17 @@ class StripeCheckoutIntegration
 
         ob_start();
         ?>
-        <div id="stripe-checkout-container">
-            <h2>Products</h2>
-            <div id="product-list"></div>
-            <h3>Cart</h3>
-            <div id="cart"></div>
-            <button id="checkout-button" class="btn btn-filled">Checkout</button>
+        <div class="checkout-container" id="stripe-checkout-container">
+            <div class="products">
+                <h2>Products</h2>
+                <div class="product-grid" id="product-list"></div>
+            </div>
+            <div class="cart">
+                <h3>Cart</h3>
+                <div id="cart">
+                </div>
+                <button id="checkout-button" class="btn btn-filled">Checkout</button>
+            </div>
         </div>
         <?php
         return ob_get_clean();
@@ -595,8 +623,8 @@ class StripeCheckoutIntegration
 
         // Only enqueue scripts and localize data if the shortcode is present
         if (is_a($post, 'WP_Post') && has_shortcode($post->post_content, 'stripe-checkout')) {
-            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), '1.6', true);
-            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css');
+            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), rand(10,100), true);
+            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css','',rand(10,100));
 
             // Fetch shipping rate info
             $this->fetch_shipping_rate_info();
