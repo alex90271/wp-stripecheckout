@@ -4,6 +4,8 @@
         return;
     }
 
+    
+
     let cart = {};
     let shippingRate = null;
 
@@ -48,7 +50,7 @@
             productList.append(`
                 <div class="product-item">
                     <img src="${imageUrl}" alt="${product.name}" class="product-image">
-                    <h3>${product.name}</h3>
+                    <h4>${product.name}</h4>
                     <p class="product-description">${product.description || ''}</p>
                     <p class="product-price">${priceDisplay}</p>
                     ${product.price ? `<button class="add-to-cart btn btn-white" data-product-id="${product.id}">${buttonText}</button>` : ''}

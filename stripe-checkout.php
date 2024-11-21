@@ -531,7 +531,7 @@ class StripeCheckoutIntegration
                         'message' => 'A receipt will be sent to the email address listed above'
                     ],
                     'terms_of_service_acceptance' => [
-                        'message' => 'I agree to the '. get_bloginfo('name').' terms of service located at '. get_site_url() .''
+                        'message' => 'I agree to the ' . get_bloginfo('name') . ' terms of service located at ' . get_site_url() . ''
                     ],
                     'submit' => [
                         'message' => 'Orders are shipped the next buisness day via USPS. Please allow 5-10 days'
@@ -539,7 +539,9 @@ class StripeCheckoutIntegration
                 ],
                 "submit_type" => 'pay',
                 'payment_intent_data' => [
-                    'description' => implode(",", $line_items),
+                    'description' => implode(", ", array_map(function ($item) {
+                        return $item['price_data']['product_data']['name'];
+                    }, $line_items)),
                 ],
                 'shipping_address_collection' => [
                     'allowed_countries' => ['US'],
@@ -623,8 +625,8 @@ class StripeCheckoutIntegration
 
         // Only enqueue scripts and localize data if the shortcode is present
         if (is_a($post, 'WP_Post') && has_shortcode($post->post_content, 'stripe-checkout')) {
-            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), rand(10,100), true);
-            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css','',rand(10,100));
+            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), rand(10, 100), true);
+            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', rand(10, 100));
 
             // Fetch shipping rate info
             $this->fetch_shipping_rate_info();
