@@ -1,9 +1,9 @@
-(function($) {
+(function ($) {
     if (stripe_checkout_vars.store_disabled == '1') {
         // Store is disabled, don't initialize anything
         return;
     }
-    
+
     let cart = {};
     let shippingRate = null;
 
@@ -14,7 +14,7 @@
             data: {
                 action: 'fetch_stripe_products'
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
                     displayProducts(response.data);
                 } else {
@@ -27,7 +27,7 @@
     function displayProducts(products) {
         const productList = $('#product-list');
         productList.empty();
-        
+
         if (products.length === 0) {
             productList.append('<p>No products available at the moment.</p>');
             return;
@@ -36,10 +36,10 @@
         productList.addClass('product-grid');
 
         products.forEach(product => {
-            const priceDisplay = product.price 
-                ? `${formatPrice(product.price, product.currency)}` 
+            const priceDisplay = product.price
+                ? `${formatPrice(product.price, product.currency)}`
                 : 'Price not available';
-            
+
             const imageUrl = product.image || 'https://placehold.co/600x400/000000/FFFFFF.png';
 
             const quantity = cart[product.id] ? cart[product.id].quantity : 0;
@@ -73,30 +73,30 @@
             subtotal += item.price * item.quantity;
             cartEl.append(`
                 <div class="cart-item">
-                    <span>${item.quantity}x ${item.name}</span>
-                    <button class="remove-from-cart" data-product-id="${item.id}">Remove</button>
+                    <span class="cart-item-quantity"><strong style="padding-right: 5px">${item.quantity}x</strong>  ${item.name}</span>
+                    <button class="remove-from-cart" data-product-id="${item.id}">X</button>
                 </div>
             `);
         });
 
-        cartEl.append(`<div class="cart-subtotal">Subtotal: ${formatPrice(subtotal, 'USD')}</div>`);
+        cartEl.append(`<div class="cart-subtotal"><strong>Subtotal:</strong> ${formatPrice(subtotal, 'USD')}</div>`);
 
         if (shippingRate) {
             cartEl.append(`
                 <div class="cart-shipping">
-                    Shipping: ${shippingRate.display_name}
+                    <strong>Shipping:</strong>
                     ${formatPrice(shippingRate.amount, shippingRate.currency)}
                 </div>
             `);
 
             const total = subtotal + shippingRate.amount;
-            cartEl.append(`<div class="cart-total">Total: ${formatPrice(total, 'USD')}</div>`);
+            cartEl.append(`<div class="cart-total"><strong>Total:</strong> ${formatPrice(total, 'USD')}</div>`);
         } else {
-            cartEl.append(`<div class="cart-shipping">Shipping: Not calculated</div>`);
+            cartEl.append(`<div class="cart-shipping"><strong>Shipping:</strong> Not calculated</div>`);
         }
 
         // Update all "Add to Cart" buttons
-        $('.add-to-cart').each(function() {
+        $('.add-to-cart').each(function () {
             const productId = $(this).data('product-id');
             const quantity = cart[productId] ? cart[productId].quantity : 0;
             $(this).text(quantity > 0 ? `Add to Cart (${quantity})` : 'Add to Cart');
@@ -109,7 +109,7 @@
         }
     }
 
-    $(document).on('click', '.add-to-cart', function() {
+    $(document).on('click', '.add-to-cart', function () {
         const productId = $(this).data('product-id');
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
@@ -118,7 +118,7 @@
                 action: 'get_stripe_product',
                 product_id: productId
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
                     if (cart[productId]) {
                         cart[productId].quantity += 1;
@@ -133,7 +133,7 @@
         });
     });
 
-    $(document).on('click', '.remove-from-cart', function() {
+    $(document).on('click', '.remove-from-cart', function () {
         const productId = $(this).data('product-id');
         if (cart[productId]) {
             if (cart[productId].quantity > 1) {
@@ -145,7 +145,7 @@
         }
     });
 
-    $('#checkout-button').on('click', function() {
+    $('#checkout-button').on('click', function () {
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
@@ -153,7 +153,7 @@
                 action: 'create_checkout_session',
                 cart: JSON.stringify(Object.values(cart))
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
                     window.location.href = response.data.url;
                 } else {
@@ -163,7 +163,7 @@
         });
     });
 
-    $(document).ready(function() {
+    $(document).ready(function () {
         fetchProducts();
         initShippingRate();
         updateCart();
