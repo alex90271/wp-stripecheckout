@@ -571,13 +571,12 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    private function group_cart_items($cart)
-    {
+    private function group_cart_items($cart) {
         $grouped_cart = [];
         foreach ($cart as $item) {
             $key = $item['id'];
             if (isset($grouped_cart[$key])) {
-                $grouped_cart[$key]['quantity'] += 1;
+                $grouped_cart[$key]['quantity'] += $item['quantity'];
             } else {
                 $grouped_cart[$key] = [
                     'price_data' => [
@@ -587,7 +586,7 @@ class StripeCheckoutIntegration
                         ],
                         'unit_amount' => $item['price'],
                     ],
-                    'quantity' => 1,
+                    'quantity' => $item['quantity'],
                 ];
             }
         }
