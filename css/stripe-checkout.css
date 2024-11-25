@@ -3,6 +3,11 @@
     grid-template-columns: 3fr 1fr;
 }
 
+@media (max-width:600px)  { .checkout-container {
+    display: grid;
+    grid-template-columns: 1fr;
+} }
+
 .cart-item-quantity {
     display: flex;
     align-self: center;
@@ -10,7 +15,7 @@
 
 .product-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 20px;
     padding: 20px;
 }
