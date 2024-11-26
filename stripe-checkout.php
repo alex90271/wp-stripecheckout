@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Simple Stripe Checkout
  * Description: Integrates Stripe Checkout Sessions with WordPress, using products and shipping ID from Stripe.
- * Version: 1.5
+ * Version: 1.6
  * Author: Alex Alder
  */
 
@@ -44,10 +44,9 @@ class StripeCheckoutIntegration
         add_action('admin_init', array($this, 'handle_clear_cache_button'));
 
 
-        // Register shortcode
-        add_shortcode('stripe-checkout', array($this, 'stripe_checkout_shortcode'));
-        add_shortcode('stripe-checkout-success', array($this, 'stripe_checkout_success_shortcode'));
-
+        register_activation_hook(__FILE__, array($this, 'plugin_activation'));
+        register_deactivation_hook(__FILE__, array($this, 'plugin_deactivation'));
+        add_filter('the_content', array($this, 'modify_store_page_content'));    
 
         // Enqueue scripts and styles
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
@@ -98,21 +97,6 @@ class StripeCheckoutIntegration
         return openssl_decrypt($encrypted_data, 'AES-256-CBC', $this->encryption_key, 0, $iv);
     }
 
-    public function stripe_checkout_success_shortcode()
-    {
-        // Check if the checkout was successful
-        if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
-            return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know. </p>';
-        } else {
-            return '<p>Invalid request. Please contact support.</p>';
-        }
-    }
-
-    private function retrieve_line_items($session_id)
-    {
-        return \Stripe\Checkout\Session::allLineItems($session_id);
-    }
-
     private function format_amount($amount, $currency)
     {
         return number_format($amount / 100, 2) . ' ' . strtoupper($currency);
@@ -137,6 +121,70 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_webhook_secret_encrypted', array($this, 'encrypt_api_key'));
         register_setting('stripe_checkout_options', 'stripe_timezone');
 
+    }
+
+    public function plugin_activation() {
+        if (!$this->get_store_page_id()) {
+            $page_data = array(
+                'post_title'    => 'Stripe Store',
+                'post_name'     => $this->page_slug,
+                'post_status'   => 'publish',
+                'post_type'     => 'page',
+                'post_content'  => '<!-- wp:paragraph -->This page is managed by the Stripe Store plugin.<!-- /wp:paragraph -->'
+            );
+            
+            $page_id = wp_insert_post($page_data);
+            
+            if (!is_wp_error($page_id)) {
+                update_option('stripe_store_page_id', $page_id);
+            }
+        }
+    }
+    
+    public function plugin_deactivation() {
+        $page_id = $this->get_store_page_id();
+        if ($page_id) {
+            wp_delete_post($page_id, true);
+            delete_option('stripe_store_page_id');
+        }
+    }
+    
+    private function get_store_page_id() {
+        $page_id = get_option('stripe_store_page_id');
+        if (!$page_id) {
+            $page = get_page_by_path($this->page_slug);
+            if ($page) {
+                $page_id = $page->ID;
+                update_option('stripe_store_page_id', $page_id);
+            }
+        }
+        return $page_id;
+    }
+    
+    public function modify_store_page_content($content) {
+        if (is_page() && get_the_ID() == $this->get_store_page_id()) {
+            if (get_option('stripe_disable_store', 0) == 1) {
+                $disabled_message = get_option('stripe_store_disabled_message', 'The store is currently closed.');
+                return '<div class="store-disabled-message">' . wp_kses_post($disabled_message) . '</div>';
+            }
+    
+            if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
+                return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know.<br><a href="/stripestore">Return to store</a></p>';
+            }
+    
+            return '<div class="checkout-container" id="stripe-checkout-container">
+                <div class="products">
+                    <h2>Products</h2>
+                    <div class="product-grid" id="product-list"></div>
+                </div>
+                <div class="cart">
+                    <h3>Cart</h3>
+                    <div id="cart"></div>
+                    <button id="checkout-button" class="btn btn-filled">Checkout</button>
+                </div>
+            </div>';
+        }
+        return $content;
     }
 
     public function encrypt_api_key($value)
@@ -518,8 +566,8 @@ class StripeCheckoutIntegration
             $session_params = [
                 'line_items' => $line_items,
                 'mode' => 'payment',
-                'success_url' => home_url('/success?checkout=success'),
-                'cancel_url' => home_url('/gcstore?checkout=cancelled'),
+                'success_url' => home_url('/stripestore?checkout=success'),
+                'cancel_url' => home_url('/stripestore?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
                 ],
@@ -593,43 +641,13 @@ class StripeCheckoutIntegration
         return array_values($grouped_cart);
     }
 
-    public function stripe_checkout_shortcode()
-    {
-        if (get_option('stripe_disable_store', 0) == 1) {
-            $disabled_message = get_option('stripe_store_disabled_message', 'The store is currently closed.');
-            return '<div class="store-disabled-message">' . wp_kses_post($disabled_message) . '</div>';
-        }
-
-        ob_start();
-        ?>
-        <div class="checkout-container" id="stripe-checkout-container">
-            <div class="products">
-                <h2>Products</h2>
-                <div class="product-grid" id="product-list"></div>
-            </div>
-            <div class="cart">
-                <h3>Cart</h3>
-                <div id="cart">
-                </div>
-                <button id="checkout-button" class="btn btn-filled">Checkout</button>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-
-    public function enqueue_scripts()
-    {
-        global $post;
-
-        // Only enqueue scripts and localize data if the shortcode is present
-        if (is_a($post, 'WP_Post') && has_shortcode($post->post_content, 'stripe-checkout')) {
+    public function enqueue_scripts() {
+        if (is_page() && get_the_ID() == $this->get_store_page_id()) {
             wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), rand(10, 100), true);
             wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', rand(10, 100));
-
-            // Fetch shipping rate info
+    
             $this->fetch_shipping_rate_info();
-
+    
             wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'shipping_rate_id' => $this->shipping_rate_id,
