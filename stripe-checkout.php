@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Simple Stripe Checkout
  * Description: Integrates Stripe Checkout Sessions with WordPress, using products and shipping ID from Stripe.
- * Version: 1.6
+ * Version: 2.0
  * Author: Alex Alder
  */
 
