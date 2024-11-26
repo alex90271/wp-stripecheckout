@@ -12,7 +12,9 @@
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
             data: {
-                action: 'fetch_stripe_products'
+                action: 'fetch_stripe_products',
+                _ajax_nonce: stripe_checkout_vars.fetch_products_nonce
+
             },
             success: function (response) {
                 if (response.success) {
@@ -183,6 +185,7 @@
     });
 
     $('#checkout-button').on('click', function() {
+        
         const button = $(this);
         button.prop('disabled', true).text('Processing...');
         
@@ -197,6 +200,7 @@
             type: 'POST',
             data: {
                 action: 'create_checkout_session',
+                _ajax_nonce: stripe_checkout_vars.checkout_nonce,
                 cart: JSON.stringify(cartArray)
             },
             success: function(response) {

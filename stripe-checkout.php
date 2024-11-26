@@ -450,6 +450,7 @@ class StripeCheckoutIntegration
 
     public function fetch_stripe_products()
     {
+        check_ajax_referer('fetch_products_nonce');
         $cache_key = 'stripe_products_cache';
         $cache_expiration = 259200; // Cache for 1 hour
 
@@ -554,6 +555,8 @@ class StripeCheckoutIntegration
     }
     public function get_stripe_product()
     {
+        check_ajax_referer('get_product_nonce');
+
         if (!isset($_POST['product_id'])) {
             wp_send_json_error('No product ID provided');
         }
@@ -610,6 +613,8 @@ class StripeCheckoutIntegration
 
     public function create_checkout_session()
     {
+        check_ajax_referer('checkout_nonce');
+
         if (!isset($_POST['cart'])) {
             wp_send_json_error('No cart data provided');
         }
@@ -741,7 +746,9 @@ class StripeCheckoutIntegration
                 'shipping_rate_id' => $this->shipping_rate_id,
                 'shipping_rate_info' => $this->shipping_rate_info,
                 'store_disabled' => get_option('stripe_disable_store', 0),
-                'max_quantity_per_item' => get_option('stripe_max_quantity_per_item', 10) // Add this line
+                'max_quantity_per_item' => get_option('stripe_max_quantity_per_item', 10),
+                'fetch_products_nonce' => wp_create_nonce('fetch_products_nonce'),
+                'checkout_nonce' => wp_create_nonce('checkout_nonce')
             ));
         }
     }
