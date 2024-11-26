@@ -46,7 +46,7 @@ class StripeCheckoutIntegration
 
         register_activation_hook(__FILE__, array($this, 'plugin_activation'));
         register_deactivation_hook(__FILE__, array($this, 'plugin_deactivation'));
-        add_filter('the_content', array($this, 'modify_store_page_content'));    
+        add_filter('the_content', array($this, 'modify_store_page_content'));
 
         // Enqueue scripts and styles
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
@@ -120,36 +120,42 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_store_disabled_message');
         register_setting('stripe_checkout_options', 'stripe_webhook_secret_encrypted', array($this, 'encrypt_api_key'));
         register_setting('stripe_checkout_options', 'stripe_timezone');
+        register_setting('stripe_checkout_options', 'stripe_checkout_receipt_message');
+        register_setting('stripe_checkout_options', 'stripe_checkout_terms_message');
+        register_setting('stripe_checkout_options', 'stripe_checkout_shipping_message');
 
     }
 
-    public function plugin_activation() {
+    public function plugin_activation()
+    {
         if (!$this->get_store_page_id()) {
             $page_data = array(
-                'post_title'    => 'Stripe Store',
-                'post_name'     => $this->page_slug,
-                'post_status'   => 'publish',
-                'post_type'     => 'page',
-                'post_content'  => '<!-- wp:paragraph -->This page is managed by the Stripe Store plugin.<!-- /wp:paragraph -->'
+                'post_title' => 'Store',
+                'post_name' => $this->page_slug,
+                'post_status' => 'publish',
+                'post_type' => 'page',
+                'post_content' => '<!-- wp:paragraph -->This page is managed by the Stripe Store plugin.<!-- /wp:paragraph -->'
             );
-            
+
             $page_id = wp_insert_post($page_data);
-            
+
             if (!is_wp_error($page_id)) {
                 update_option('stripe_store_page_id', $page_id);
             }
         }
     }
-    
-    public function plugin_deactivation() {
+
+    public function plugin_deactivation()
+    {
         $page_id = $this->get_store_page_id();
         if ($page_id) {
             wp_delete_post($page_id, true);
             delete_option('stripe_store_page_id');
         }
     }
-    
-    private function get_store_page_id() {
+
+    private function get_store_page_id()
+    {
         $page_id = get_option('stripe_store_page_id');
         if (!$page_id) {
             $page = get_page_by_path($this->page_slug);
@@ -160,18 +166,19 @@ class StripeCheckoutIntegration
         }
         return $page_id;
     }
-    
-    public function modify_store_page_content($content) {
+
+    public function modify_store_page_content($content)
+    {
         if (is_page() && get_the_ID() == $this->get_store_page_id()) {
             if (get_option('stripe_disable_store', 0) == 1) {
                 $disabled_message = get_option('stripe_store_disabled_message', 'The store is currently closed.');
                 return '<div class="store-disabled-message">' . wp_kses_post($disabled_message) . '</div>';
             }
-    
+
             if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
-                return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know.<br><a href="/stripestore">Return to store</a></p>';
+                return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know.</p><p><a href="/store">Return to store</a></p>';
             }
-    
+
             return '<div class="checkout-container" id="stripe-checkout-container">
                 <div class="products">
                     <h2>Products</h2>
@@ -271,7 +278,35 @@ class StripeCheckoutIntegration
                         </td>
                     </tr>
                 </table>
-
+                <!-- Add this new section before the closing form tag -->
+                <h2>Checkout Messages</h2>
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Receipt Email Message</th>
+                        <td>
+                            <textarea name="stripe_checkout_receipt_message" rows="2"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_checkout_receipt_message', 'A receipt will be sent to the email address listed above')); ?></textarea>
+                            <p class="description">Message shown above the email field during checkout.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Terms of Service Message</th>
+                        <td>
+                            <textarea name="stripe_checkout_terms_message" rows="2"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_checkout_terms_message', 'I agree to the {site_name} terms of service located at {site_url}')); ?></textarea>
+                            <p class="description">Terms of service acceptance message. Use {site_name} and {site_url} as
+                                placeholders.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Shipping Information Message</th>
+                        <td>
+                            <textarea name="stripe_checkout_shipping_message" rows="2"
+                                cols="50"><?php echo esc_textarea(get_option('stripe_checkout_shipping_message', 'Orders are shipped the next business day via USPS. Please allow 5-10 days')); ?></textarea>
+                            <p class="description">Message shown on the submit button page.</p>
+                        </td>
+                    </tr>
+                </table>
                 <h2>Notification Settings</h2>
                 <table class="form-table">
                     <tr valign="top">
@@ -551,7 +586,7 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    public function create_checkout_session()
+        public function create_checkout_session()
     {
         if (!isset($_POST['cart'])) {
             wp_send_json_error('No cart data provided');
@@ -563,11 +598,23 @@ class StripeCheckoutIntegration
             $this->init_stripe();
             $line_items = $this->group_cart_items($cart);
 
+            // Get custom messages from options
+            $receipt_message = get_option('stripe_checkout_receipt_message', 'A receipt will be sent to the email address listed above');
+            $terms_message = get_option('stripe_checkout_terms_message', 'I agree to the {site_name} terms of service located at {site_url}');
+            $shipping_message = get_option('stripe_checkout_shipping_message', 'Orders are shipped the next business day via USPS. Please allow 5-10 days');
+
+            // Replace placeholders in terms message
+            $terms_message = str_replace(
+                ['{site_name}', '{site_url}'],
+                [get_bloginfo('name'), get_site_url()],
+                $terms_message
+            );
+
             $session_params = [
                 'line_items' => $line_items,
                 'mode' => 'payment',
-                'success_url' => home_url('/stripestore?checkout=success'),
-                'cancel_url' => home_url('/stripestore?checkout=cancelled'),
+                'success_url' => home_url('/store?checkout=success'),
+                'cancel_url' => home_url('/store?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
                 ],
@@ -576,13 +623,13 @@ class StripeCheckoutIntegration
                 ],
                 'custom_text' => [
                     'shipping_address' => [
-                        'message' => 'A receipt will be sent to the email address listed above'
+                        'message' => $receipt_message
                     ],
                     'terms_of_service_acceptance' => [
-                        'message' => 'I agree to the ' . get_bloginfo('name') . ' terms of service located at ' . get_site_url() . ''
+                        'message' => $terms_message
                     ],
                     'submit' => [
-                        'message' => 'Orders are shipped the next buisness day via USPS. Please allow 5-10 days'
+                        'message' => $shipping_message
                     ],
                 ],
                 "submit_type" => 'pay',
@@ -619,7 +666,8 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    private function group_cart_items($cart) {
+    private function group_cart_items($cart)
+    {
         $grouped_cart = [];
         foreach ($cart as $item) {
             $key = $item['id'];
@@ -641,13 +689,14 @@ class StripeCheckoutIntegration
         return array_values($grouped_cart);
     }
 
-    public function enqueue_scripts() {
+    public function enqueue_scripts()
+    {
         if (is_page() && get_the_ID() == $this->get_store_page_id()) {
             wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), rand(10, 100), true);
             wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', rand(10, 100));
-    
+
             $this->fetch_shipping_rate_info();
-    
+
             wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'shipping_rate_id' => $this->shipping_rate_id,
