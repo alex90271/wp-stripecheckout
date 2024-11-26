@@ -4,10 +4,9 @@
         return;
     }
 
-    
-
     let cart = {};
     let shippingRate = null;
+    let productCache = {};  // Cache for product data
 
     function fetchProducts() {
         $.ajax({
@@ -18,6 +17,10 @@
             },
             success: function (response) {
                 if (response.success) {
+                    // Cache product data when first fetched
+                    response.data.forEach(product => {
+                        productCache[product.id] = product;
+                    });
                     displayProducts(response.data);
                 } else {
                     console.error('Error fetching products:', response.data);
@@ -66,43 +69,45 @@
         }).format(amount / 100);
     }
 
-    function updateCart() {
+    function updateCartEfficiently() {
         const cartEl = $('#cart');
-        cartEl.empty();
+        let cartHTML = '';
         let subtotal = 0;
 
         Object.values(cart).forEach(item => {
             subtotal += item.price * item.quantity;
-            cartEl.append(`
+            cartHTML += `
                 <div class="cart-item">
-                    <span class="cart-item-quantity"><strong style="padding-right: 5px">${item.quantity}x</strong>  ${item.name}</span>
+                    <span class="cart-item-quantity"><strong style="padding-right: 5px">${item.quantity}x</strong> ${item.name}</span>
                     <button class="remove-from-cart" data-product-id="${item.id}">X</button>
                 </div>
-            `);
+            `;
         });
 
-        cartEl.append(`<div class="cart-subtotal"><strong>Subtotal:</strong> ${formatPrice(subtotal, 'USD')}</div>`);
+        cartHTML += `<div class="cart-subtotal"><strong>Subtotal:</strong> ${formatPrice(subtotal, 'USD')}</div>`;
 
         if (shippingRate) {
-            cartEl.append(`
+            cartHTML += `
                 <div class="cart-shipping">
                     <strong>Shipping:</strong>
                     ${formatPrice(shippingRate.amount, shippingRate.currency)}
                 </div>
-            `);
-
-            const total = subtotal + shippingRate.amount;
-            cartEl.append(`<div class="cart-total"><strong>Total:</strong> ${formatPrice(total, 'USD')}</div>`);
+                <div class="cart-total"><strong>Total:</strong> ${formatPrice(subtotal + shippingRate.amount, 'USD')}</div>
+            `;
         } else {
-            cartEl.append(`<div class="cart-shipping"><strong>Shipping:</strong> Not calculated</div>`);
+            cartHTML += '<div class="cart-shipping"><strong>Shipping:</strong> Not calculated</div>';
         }
 
-        // Update all "Add to Cart" buttons
-        $('.add-to-cart').each(function () {
-            const productId = $(this).data('product-id');
-            const quantity = cart[productId] ? cart[productId].quantity : 0;
-            $(this).text(quantity > 0 ? `Add to Cart (${quantity})` : 'Add to Cart');
-        });
+        // Single DOM update
+        cartEl.html(cartHTML);
+
+        // Update cart button visibility
+        const checkoutButton = $('#checkout-button');
+        if (Object.keys(cart).length > 0) {
+            checkoutButton.show();
+        } else {
+            checkoutButton.hide();
+        }
     }
 
     function initShippingRate() {
@@ -111,43 +116,60 @@
         }
     }
 
-    $(document).on('click', '.add-to-cart', function () {
-        const productId = $(this).data('product-id');
-        $.ajax({
-            url: stripe_checkout_vars.ajax_url,
-            type: 'POST',
-            data: {
-                action: 'get_stripe_product',
-                product_id: productId
-            },
-            success: function (response) {
-                if (response.success) {
-                    if (cart[productId]) {
-                        cart[productId].quantity += 1;
-                    } else {
-                        cart[productId] = { ...response.data, quantity: 1 };
-                    }
-                    updateCart();
-                } else {
-                    console.error('Error adding product to cart:', response.data);
-                }
+    // Debounce function to prevent rapid clicks
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // Debounced click handler for add to cart
+    const debouncedAddToCart = debounce(function(productId, button) {
+        if (productCache[productId]) {
+            if (cart[productId]) {
+                cart[productId].quantity += 1;
+            } else {
+                cart[productId] = { ...productCache[productId], quantity: 1 };
             }
-        });
+            
+            // Update only the specific button clicked
+            button.text(`Add to Cart (${cart[productId].quantity})`);
+            
+            // Update cart display efficiently
+            updateCartEfficiently();
+        }
+    }, 250); // 250ms debounce time
+
+    $(document).on('click', '.add-to-cart', function(e) {
+        e.preventDefault();
+        const productId = $(this).data('product-id');
+        debouncedAddToCart(productId, $(this));
     });
 
-    $(document).on('click', '.remove-from-cart', function () {
+    $(document).on('click', '.remove-from-cart', function() {
         const productId = $(this).data('product-id');
         if (cart[productId]) {
             if (cart[productId].quantity > 1) {
                 cart[productId].quantity -= 1;
+                $(`.add-to-cart[data-product-id="${productId}"]`).text(`Add to Cart (${cart[productId].quantity})`);
             } else {
                 delete cart[productId];
+                $(`.add-to-cart[data-product-id="${productId}"]`).text('Add to Cart');
             }
-            updateCart();
+            updateCartEfficiently();
         }
     });
 
-    $('#checkout-button').on('click', function () {
+    $('#checkout-button').on('click', function() {
+        const button = $(this);
+        button.prop('disabled', true).text('Processing...');
+        
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
@@ -155,19 +177,25 @@
                 action: 'create_checkout_session',
                 cart: JSON.stringify(Object.values(cart))
             },
-            success: function (response) {
+            success: function(response) {
                 if (response.success) {
                     window.location.href = response.data.url;
                 } else {
                     console.error('Error creating checkout session:', response.data);
+                    button.prop('disabled', false).text('Checkout');
+                    alert('There was an error processing your checkout. Please try again.');
                 }
+            },
+            error: function() {
+                button.prop('disabled', false).text('Checkout');
+                alert('There was an error processing your checkout. Please try again.');
             }
         });
     });
 
-    $(document).ready(function () {
+    $(document).ready(function() {
         fetchProducts();
         initShippingRate();
-        updateCart();
+        updateCartEfficiently();
     });
 })(jQuery);
