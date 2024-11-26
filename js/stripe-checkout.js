@@ -144,7 +144,7 @@
             // Update cart display efficiently
             updateCartEfficiently();
         }
-    }, 250); // 250ms debounce time
+    }, 50); // 250ms debounce time
 
     $(document).on('click', '.add-to-cart', function(e) {
         e.preventDefault();
