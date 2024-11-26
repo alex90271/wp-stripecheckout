@@ -123,6 +123,10 @@ class StripeCheckoutIntegration
         register_setting('stripe_checkout_options', 'stripe_checkout_receipt_message');
         register_setting('stripe_checkout_options', 'stripe_checkout_terms_message');
         register_setting('stripe_checkout_options', 'stripe_checkout_shipping_message');
+        register_setting('stripe_checkout_options', 'stripe_max_quantity_per_item', array(
+            'default' => 10,
+            'sanitize_callback' => array($this, 'sanitize_max_quantity')
+        ));
 
     }
 
@@ -203,7 +207,16 @@ class StripeCheckoutIntegration
     {
         add_options_page('Stripe Checkout Settings', 'Stripe Checkout', 'manage_options', 'stripe-checkout-settings', array($this, 'render_settings_page'));
     }
-
+    public function sanitize_max_quantity($value)
+    {
+        $value = absint($value); // Convert to positive integer
+        if ($value < 1) {
+            $value = 1;
+        } elseif ($value > 99) {
+            $value = 99;
+        }
+        return $value;
+    }
     public function render_settings_page()
     {
         $decrypted_key = $this->get_stripe_secret_key();
@@ -275,6 +288,15 @@ class StripeCheckoutIntegration
                             <textarea name="stripe_store_disabled_message" rows="5"
                                 cols="50"><?php echo esc_textarea(get_option('stripe_store_disabled_message')); ?></textarea>
                             <p class="description">Enter the message to display when the store is disabled</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Maximum Quantity Per Item</th>
+                        <td>
+                            <input type="number" name="stripe_max_quantity_per_item"
+                                value="<?php echo esc_attr(get_option('stripe_max_quantity_per_item', 10)); ?>" min="1"
+                                max="99" />
+                            <p class="description">Maximum quantity allowed per item in cart (1-99)</p>
                         </td>
                     </tr>
                 </table>
@@ -586,7 +608,8 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-    public function create_checkout_session() {
+    public function create_checkout_session()
+    {
         if (!isset($_POST['cart'])) {
             wp_send_json_error('No cart data provided');
         }
@@ -664,22 +687,41 @@ class StripeCheckoutIntegration
         }
         wp_die();
     }
-    private function group_cart_items($cart) {
+    private function group_cart_items($cart)
+    {
         $grouped_cart = [];
+        $max_quantity = get_option('stripe_max_quantity_per_item', 10);
+
         foreach ($cart as $item) {
             $key = $item['id'];
+
+            // Validate individual item quantity
+            if ($item['quantity'] > $max_quantity) {
+                wp_send_json_error("Maximum quantity of {$max_quantity} per item exceeded");
+                return;
+            }
+
             if (isset($grouped_cart[$key])) {
                 $grouped_cart[$key]['quantity'] += $item['quantity'];
+                // Check combined quantity if same item appears multiple times
+                if ($grouped_cart[$key]['quantity'] > $max_quantity) {
+                    wp_send_json_error("Maximum quantity of {$max_quantity} per item exceeded");
+                    return;
+                }
             } else {
-                // Fetch the product to get its default price ID
                 $product = \Stripe\Product::retrieve([
                     'id' => $key,
                     'expand' => ['default_price']
                 ]);
-                
+
                 $grouped_cart[$key] = [
-                    'price' => $product->default_price->id,  // Use the price ID directly
+                    'price' => $product->default_price->id,
                     'quantity' => $item['quantity'],
+                    'adjustable_quantity' => [
+                        'enabled' => true,
+                        'minimum' => 1,
+                        'maximum' => $max_quantity
+                    ]
                 ];
             }
         }
@@ -698,7 +740,8 @@ class StripeCheckoutIntegration
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'shipping_rate_id' => $this->shipping_rate_id,
                 'shipping_rate_info' => $this->shipping_rate_info,
-                'store_disabled' => get_option('stripe_disable_store', 0)
+                'store_disabled' => get_option('stripe_disable_store', 0),
+                'max_quantity_per_item' => get_option('stripe_max_quantity_per_item', 10) // Add this line
             ));
         }
     }

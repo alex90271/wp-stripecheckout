@@ -115,9 +115,16 @@
         }
     }
 
+    const MAX_PER_ITEM = stripe_checkout_vars.max_quantity_per_item;
+
     const debouncedAddToCart = debounce(function(productId, button) {
         if (productCache[productId]) {
             if (cart[productId]) {
+                // Check if adding one more would exceed the per-item limit
+                if (cart[productId].quantity >= MAX_PER_ITEM) {
+                    alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
+                    return;
+                }
                 cart[productId].quantity += 1;
             } else {
                 cart[productId] = {
@@ -130,6 +137,11 @@
             updateCartEfficiently();
         }
     }, 50);
+
+    // Add a helper function to check total cart quantity
+    function getTotalCartQuantity() {
+        return Object.values(cart).reduce((total, item) => total + item.quantity, 0);
+    }
 
     function debounce(func, wait) {
         let timeout;
@@ -146,6 +158,13 @@
     $(document).on('click', '.add-to-cart', function(e) {
         e.preventDefault();
         const productId = $(this).data('product-id');
+        
+        // Check only the specific item's quantity
+        if (cart[productId] && cart[productId].quantity >= MAX_PER_ITEM) {
+            alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
+            return;
+        }
+        
         debouncedAddToCart(productId, $(this));
     });
 
