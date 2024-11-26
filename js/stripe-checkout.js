@@ -1,12 +1,11 @@
 (function ($) {
     if (stripe_checkout_vars.store_disabled == '1') {
-        // Store is disabled, don't initialize anything
         return;
     }
 
-    let cart = {};
+    let cart = {};  // Will now store just {id, quantity}
     let shippingRate = null;
-    let productCache = {};  // Cache for product data
+    let productCache = {};  // Keep cache for display purposes
 
     function fetchProducts() {
         $.ajax({
@@ -17,7 +16,6 @@
             },
             success: function (response) {
                 if (response.success) {
-                    // Cache product data when first fetched
                     response.data.forEach(product => {
                         productCache[product.id] = product;
                     });
@@ -74,12 +72,15 @@
         let cartHTML = '';
         let subtotal = 0;
 
-        Object.values(cart).forEach(item => {
-            subtotal += item.price * item.quantity;
+        Object.keys(cart).forEach(productId => {
+            const product = productCache[productId];
+            const quantity = cart[productId].quantity;
+            subtotal += product.price * quantity;
+            
             cartHTML += `
                 <div class="cart-item">
-                    <span class="cart-item-quantity"><strong style="padding-right: 5px">${item.quantity}x</strong> ${item.name}</span>
-                    <button class="remove-from-cart" data-product-id="${item.id}">X</button>
+                    <span class="cart-item-quantity"><strong style="padding-right: 5px">${quantity}x</strong> ${product.name}</span>
+                    <button class="remove-from-cart" data-product-id="${productId}">X</button>
                 </div>
             `;
         });
@@ -98,10 +99,8 @@
             cartHTML += '<div class="cart-shipping"><strong>Shipping:</strong> Not calculated</div>';
         }
 
-        // Single DOM update
         cartEl.html(cartHTML);
 
-        // Update cart button visibility
         const checkoutButton = $('#checkout-button');
         if (Object.keys(cart).length > 0) {
             checkoutButton.show();
@@ -116,7 +115,22 @@
         }
     }
 
-    // Debounce function to prevent rapid clicks
+    const debouncedAddToCart = debounce(function(productId, button) {
+        if (productCache[productId]) {
+            if (cart[productId]) {
+                cart[productId].quantity += 1;
+            } else {
+                cart[productId] = {
+                    id: productId,
+                    quantity: 1
+                };
+            }
+            
+            button.text(`Add to Cart (${cart[productId].quantity})`);
+            updateCartEfficiently();
+        }
+    }, 50);
+
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -128,23 +142,6 @@
             timeout = setTimeout(later, wait);
         };
     }
-
-    // Debounced click handler for add to cart
-    const debouncedAddToCart = debounce(function(productId, button) {
-        if (productCache[productId]) {
-            if (cart[productId]) {
-                cart[productId].quantity += 1;
-            } else {
-                cart[productId] = { ...productCache[productId], quantity: 1 };
-            }
-            
-            // Update only the specific button clicked
-            button.text(`Add to Cart (${cart[productId].quantity})`);
-            
-            // Update cart display efficiently
-            updateCartEfficiently();
-        }
-    }, 50); // 250ms debounce time
 
     $(document).on('click', '.add-to-cart', function(e) {
         e.preventDefault();
@@ -170,12 +167,18 @@
         const button = $(this);
         button.prop('disabled', true).text('Processing...');
         
+        // Convert cart object to array and only send necessary data
+        const cartArray = Object.values(cart).map(item => ({
+            id: item.id,
+            quantity: item.quantity
+        }));
+        
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
             data: {
                 action: 'create_checkout_session',
-                cart: JSON.stringify(Object.values(cart))
+                cart: JSON.stringify(cartArray)
             },
             success: function(response) {
                 if (response.success) {

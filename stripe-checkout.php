@@ -586,8 +586,7 @@ class StripeCheckoutIntegration
         wp_die();
     }
 
-        public function create_checkout_session()
-    {
+    public function create_checkout_session() {
         if (!isset($_POST['cart'])) {
             wp_send_json_error('No cart data provided');
         }
@@ -665,23 +664,21 @@ class StripeCheckoutIntegration
         }
         wp_die();
     }
-
-    private function group_cart_items($cart)
-    {
+    private function group_cart_items($cart) {
         $grouped_cart = [];
         foreach ($cart as $item) {
             $key = $item['id'];
             if (isset($grouped_cart[$key])) {
                 $grouped_cart[$key]['quantity'] += $item['quantity'];
             } else {
+                // Fetch the product to get its default price ID
+                $product = \Stripe\Product::retrieve([
+                    'id' => $key,
+                    'expand' => ['default_price']
+                ]);
+                
                 $grouped_cart[$key] = [
-                    'price_data' => [
-                        'currency' => 'usd',
-                        'product_data' => [
-                            'name' => $item['name'],
-                        ],
-                        'unit_amount' => $item['price'],
-                    ],
+                    'price' => $product->default_price->id,  // Use the price ID directly
                     'quantity' => $item['quantity'],
                 ];
             }
