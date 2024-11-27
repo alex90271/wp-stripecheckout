@@ -637,10 +637,10 @@ class StripeCheckoutIntegration
                 $terms_message
             );
 
-            $product_names = [];
+            $product_descriptions = [];
             foreach ($cart as $item) {
                 $product = \Stripe\Product::retrieve($item['id']);
-                $product_names[] = $product->name;
+                $product_descriptions[] = "{$item['quantity']}x {$product->name}";
             }
 
             $session_params = [
@@ -667,7 +667,7 @@ class StripeCheckoutIntegration
                 ],
                 "submit_type" => 'pay',
                 'payment_intent_data' => [
-                    'description' => implode(", ", $product_names),
+                    'description' => implode(", ", $product_descriptions),
                 ],
                 'shipping_address_collection' => [
                     'allowed_countries' => ['US'],
