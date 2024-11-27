@@ -96,7 +96,6 @@ class StripeWebhookHandler {
                 </style>
             </head>
             <body>
-                <h2>New Successful Stripe Checkout</h2>
                 <p><strong>Order Date:</strong> %s</p>
                 <p><strong>Billed to:</strong> %s (%s)</p>
                 <p><strong>Total Amount:</strong> $%s</p>
@@ -131,6 +130,8 @@ class StripeWebhookHandler {
             error_log('Timezone error in GroupMe notification: ' . $e->getMessage());
         }
 
+        $customer = $this->sanitize_customer_data($session->customer_details);
+
         $amount = isset($session->amount_total) ? 
             number_format(abs((float)$session->amount_total) / 100, 2) : '0.00';
 
@@ -138,6 +139,7 @@ class StripeWebhookHandler {
         $message = sprintf(
             "New Order!\nDate: %s\nTotal Amount: $%s\nID: %s",
             $date,
+            $customer['name'],
             $amount,
             sanitize_text_field($session->payment_intent)
         );
