@@ -637,6 +637,12 @@ class StripeCheckoutIntegration
                 $terms_message
             );
 
+            $product_names = [];
+            foreach ($cart as $item) {
+                $product = \Stripe\Product::retrieve($item['id']);
+                $product_names[] = $product->name;
+            }
+
             $session_params = [
                 'line_items' => $line_items,
                 'mode' => 'payment',
@@ -661,9 +667,7 @@ class StripeCheckoutIntegration
                 ],
                 "submit_type" => 'pay',
                 'payment_intent_data' => [
-                    'description' => implode(", ", array_map(function ($item) {
-                        return $item['price_data']['product_data']['name'];
-                    }, $line_items)),
+                    'description' => implode(", ", $product_names),
                 ],
                 'shipping_address_collection' => [
                     'allowed_countries' => ['US'],
