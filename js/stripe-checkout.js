@@ -3,9 +3,9 @@
         return;
     }
 
-    let cart = {};  // Will now store just {id, quantity}
+    let cart = {};
     let shippingRate = null;
-    let productCache = {};  // Keep cache for display purposes
+    let productCache = {};
 
     function fetchProducts() {
         $.ajax({
@@ -14,7 +14,6 @@
             data: {
                 action: 'fetch_stripe_products',
                 _ajax_nonce: stripe_checkout_vars.fetch_products_nonce
-
             },
             success: function (response) {
                 if (response.success) {
@@ -81,8 +80,16 @@
             
             cartHTML += `
                 <div class="cart-item">
-                    <span class="cart-item-quantity"><strong style="padding-right: 5px">${quantity}x</strong> ${product.name}</span>
-                    <button class="remove-from-cart" data-product-id="${productId}">X</button>
+                    <div class="cart-item-details">
+                        <span class="cart-item-name">${product.name}</span>
+                        <br>
+                        <div class="quantity-controls">
+                            <button class="quantity-btn decrease" data-product-id="${productId}">-</button>
+                            <span class="quantity-display">${quantity}</span>
+                            <button class="quantity-btn increase" data-product-id="${productId}">+</button>
+                        </div>
+                    </div>
+                    <button class="remove-item" data-product-id="${productId}" title="Remove item">×</button>
                 </div>
             `;
         });
@@ -119,10 +126,34 @@
 
     const MAX_PER_ITEM = stripe_checkout_vars.max_quantity_per_item;
 
+    function updateQuantity(productId, delta) {
+        if (!cart[productId]) return;
+        
+        const newQuantity = cart[productId].quantity + delta;
+        
+        if (newQuantity > MAX_PER_ITEM) {
+            alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
+            return;
+        }
+        
+        if (newQuantity < 1) return;
+        
+        cart[productId].quantity = newQuantity;
+        $(`.add-to-cart[data-product-id="${productId}"]`).text(`Add to Cart (${newQuantity})`);
+        updateCartEfficiently();
+    }
+
+    function removeItem(productId) {
+        if (cart[productId]) {
+            delete cart[productId];
+            $(`.add-to-cart[data-product-id="${productId}"]`).text('Add to Cart');
+            updateCartEfficiently();
+        }
+    }
+
     const debouncedAddToCart = debounce(function(productId, button) {
         if (productCache[productId]) {
             if (cart[productId]) {
-                // Check if adding one more would exceed the per-item limit
                 if (cart[productId].quantity >= MAX_PER_ITEM) {
                     alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
                     return;
@@ -140,7 +171,6 @@
         }
     }, 50);
 
-    // Add a helper function to check total cart quantity
     function getTotalCartQuantity() {
         return Object.values(cart).reduce((total, item) => total + item.quantity, 0);
     }
@@ -161,7 +191,6 @@
         e.preventDefault();
         const productId = $(this).data('product-id');
         
-        // Check only the specific item's quantity
         if (cart[productId] && cart[productId].quantity >= MAX_PER_ITEM) {
             alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
             return;
@@ -170,26 +199,25 @@
         debouncedAddToCart(productId, $(this));
     });
 
-    $(document).on('click', '.remove-from-cart', function() {
+    $(document).on('click', '.quantity-btn.increase', function() {
         const productId = $(this).data('product-id');
-        if (cart[productId]) {
-            if (cart[productId].quantity > 1) {
-                cart[productId].quantity -= 1;
-                $(`.add-to-cart[data-product-id="${productId}"]`).text(`Add to Cart (${cart[productId].quantity})`);
-            } else {
-                delete cart[productId];
-                $(`.add-to-cart[data-product-id="${productId}"]`).text('Add to Cart');
-            }
-            updateCartEfficiently();
-        }
+        updateQuantity(productId, 1);
+    });
+
+    $(document).on('click', '.quantity-btn.decrease', function() {
+        const productId = $(this).data('product-id');
+        updateQuantity(productId, -1);
+    });
+
+    $(document).on('click', '.remove-item', function() {
+        const productId = $(this).data('product-id');
+        removeItem(productId);
     });
 
     $('#checkout-button').on('click', function() {
-        
         const button = $(this);
         button.prop('disabled', true).text('Processing...');
         
-        // Convert cart object to array and only send necessary data
         const cartArray = Object.values(cart).map(item => ({
             id: item.id,
             quantity: item.quantity
