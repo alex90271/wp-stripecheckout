@@ -81,7 +81,7 @@
             cartHTML += `
                 <div class="cart-item">
                     <div class="cart-item-details">
-                        <span class="cart-item-name"><strong>${quantity}x</strong> ${product.name} -- $${((product.price/100).toFixed(2)*quantity)}</span>
+                        <span class="cart-item-name"><strong>${quantity}x</strong> ${product.name}<br><strong>Price: </strong><i>$${((product.price/100).toFixed(2)*quantity)} ($${(product.price/100).toFixed(2)} each)</i></span>
                     </div>
                     <div class="quantity-controls">
                             <button class="quantity-btn decrease" data-product-id="${productId}">-</button>
