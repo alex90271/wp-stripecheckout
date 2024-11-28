@@ -77,17 +77,16 @@
             const product = productCache[productId];
             const quantity = cart[productId].quantity;
             subtotal += product.price * quantity;
-            
+
             cartHTML += `
                 <div class="cart-item">
                     <div class="cart-item-details">
-                        <span class="cart-item-name">${product.name}</span>
-                        <br>
-                        <div class="quantity-controls">
+                        <span class="cart-item-name"><strong>${quantity}x</strong> ${product.name} -- $${((product.price/100).toFixed(2)*quantity)}</span>
+                    </div>
+                    <div class="quantity-controls">
                             <button class="quantity-btn decrease" data-product-id="${productId}">-</button>
                             <span class="quantity-display">${quantity}</span>
                             <button class="quantity-btn increase" data-product-id="${productId}">+</button>
-                        </div>
                     </div>
                     <button class="remove-item" data-product-id="${productId}" title="Remove item">×</button>
                 </div>
@@ -128,16 +127,16 @@
 
     function updateQuantity(productId, delta) {
         if (!cart[productId]) return;
-        
+
         const newQuantity = cart[productId].quantity + delta;
-        
+
         if (newQuantity > MAX_PER_ITEM) {
             alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
             return;
         }
-        
+
         if (newQuantity < 1) return;
-        
+
         cart[productId].quantity = newQuantity;
         $(`.add-to-cart[data-product-id="${productId}"]`).text(`Add to Cart (${newQuantity})`);
         updateCartEfficiently();
@@ -151,7 +150,7 @@
         }
     }
 
-    const debouncedAddToCart = debounce(function(productId, button) {
+    const debouncedAddToCart = debounce(function (productId, button) {
         if (productCache[productId]) {
             if (cart[productId]) {
                 if (cart[productId].quantity >= MAX_PER_ITEM) {
@@ -165,7 +164,7 @@
                     quantity: 1
                 };
             }
-            
+
             button.text(`Add to Cart (${cart[productId].quantity})`);
             updateCartEfficiently();
         }
@@ -187,42 +186,42 @@
         };
     }
 
-    $(document).on('click', '.add-to-cart', function(e) {
+    $(document).on('click', '.add-to-cart', function (e) {
         e.preventDefault();
         const productId = $(this).data('product-id');
-        
+
         if (cart[productId] && cart[productId].quantity >= MAX_PER_ITEM) {
             alert(`Maximum quantity of ${MAX_PER_ITEM} reached for this item`);
             return;
         }
-        
+
         debouncedAddToCart(productId, $(this));
     });
 
-    $(document).on('click', '.quantity-btn.increase', function() {
+    $(document).on('click', '.quantity-btn.increase', function () {
         const productId = $(this).data('product-id');
         updateQuantity(productId, 1);
     });
 
-    $(document).on('click', '.quantity-btn.decrease', function() {
+    $(document).on('click', '.quantity-btn.decrease', function () {
         const productId = $(this).data('product-id');
         updateQuantity(productId, -1);
     });
 
-    $(document).on('click', '.remove-item', function() {
+    $(document).on('click', '.remove-item', function () {
         const productId = $(this).data('product-id');
         removeItem(productId);
     });
 
-    $('#checkout-button').on('click', function() {
+    $('#checkout-button').on('click', function () {
         const button = $(this);
         button.prop('disabled', true).text('Processing...');
-        
+
         const cartArray = Object.values(cart).map(item => ({
             id: item.id,
             quantity: item.quantity
         }));
-        
+
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
@@ -231,7 +230,7 @@
                 _ajax_nonce: stripe_checkout_vars.checkout_nonce,
                 cart: JSON.stringify(cartArray)
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
                     window.location.href = response.data.url;
                 } else {
@@ -240,14 +239,14 @@
                     alert('There was an error processing your checkout. Please try again.');
                 }
             },
-            error: function() {
+            error: function () {
                 button.prop('disabled', false).text('Checkout');
                 alert('There was an error processing your checkout. Please try again.');
             }
         });
     });
 
-    $(document).ready(function() {
+    $(document).ready(function () {
         fetchProducts();
         initShippingRate();
         updateCartEfficiently();
