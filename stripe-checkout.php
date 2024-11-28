@@ -102,7 +102,7 @@ class StripeCheckoutIntegration
         return number_format($amount / 100, 2) . ' ' . strtoupper($currency);
     }
 
-    private function get_stripe_secret_key()
+    public function get_stripe_secret_key()
     {
         $encrypted_key = get_option('stripe_secret_key_encrypted');
         return $this->decrypt($encrypted_key);
@@ -252,11 +252,12 @@ class StripeCheckoutIntegration
                 <h2>Store Configuration</h2>
                 <table class="form-table">
                     <tr valign="top">
-                        <th scope="row">Product IDs</th>
+                        <th scope="row">Store Products</th>
                         <td>
-                            <textarea name="stripe_product_ids" rows="5"
-                                cols="50"><?php echo esc_textarea(get_option('stripe_product_ids')); ?></textarea>
-                            <p class="description">Enter Stripe product IDs, one per line, to be displayed on the frontend.</p>
+                            <a href="<?php echo admin_url('options-general.php?page=stripe-products'); ?>" class="button">
+                                Manage Store Products
+                            </a>
+                            <p class="description">Click here to select which Stripe products to display in your store.</p>
                         </td>
                     </tr>
                     <tr valign="top">
@@ -440,7 +441,7 @@ class StripeCheckoutIntegration
         return $this->decrypt($encrypted_secret);
     }
 
-    private function init_stripe()
+    public function init_stripe()
     {
         $stripe_secret_key = $this->get_stripe_secret_key();
         if (!empty($stripe_secret_key)) {
@@ -448,11 +449,12 @@ class StripeCheckoutIntegration
         }
     }
 
+    // Update the fetch_stripe_products function in your StripeCheckoutIntegration class
     public function fetch_stripe_products()
     {
         check_ajax_referer('fetch_products_nonce');
         $cache_key = 'stripe_products_cache';
-        $cache_expiration = 259200; // Cache for 1 hour
+        $cache_expiration = 259200; // Cache for 72 hours
 
         // Try to get cached products
         $cached_products = get_transient($cache_key);
@@ -464,7 +466,11 @@ class StripeCheckoutIntegration
 
         try {
             $this->init_stripe();
-            $product_ids = array_filter(array_map('trim', explode("\n", $this->product_ids)));
+            // Get the enabled product IDs
+            $product_ids = array_filter(
+                explode("\n", get_option('stripe_product_ids', '')),
+                'trim'
+            );
 
             if (empty($product_ids)) {
                 wp_send_json_success([]);
@@ -474,25 +480,34 @@ class StripeCheckoutIntegration
             $formatted_products = [];
 
             foreach ($product_ids as $product_id) {
-                $product = \Stripe\Product::retrieve([
-                    'id' => $product_id,
-                    'expand' => ['default_price']
-                ]);
+                try {
+                    $product = \Stripe\Product::retrieve([
+                        'id' => $product_id,
+                        'expand' => ['default_price']
+                    ]);
 
-                $image_url = $product->images[0] ?? null;
-                $cached_image_url = $this->cache_image($image_url);
+                    // Only add active products that have a default price
+                    if ($product->active && $product->default_price) {
+                        $image_url = $product->images[0] ?? null;
+                        $cached_image_url = $this->cache_image($image_url);
 
-                $formatted_products[] = [
-                    'id' => $product->id,
-                    'name' => $product->name,
-                    'description' => $product->description,
-                    'price' => $product->default_price ? $product->default_price->unit_amount : null,
-                    'currency' => $product->default_price ? $product->default_price->currency : null,
-                    'image' => $cached_image_url
-                ];
+                        $formatted_products[] = [
+                            'id' => $product->id,
+                            'name' => $product->name,
+                            'description' => $product->description,
+                            'price' => $product->default_price->unit_amount,
+                            'currency' => $product->default_price->currency,
+                            'image' => $cached_image_url
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    // Log error but continue processing other products
+                    error_log('Error fetching Stripe product ' . $product_id . ': ' . $e->getMessage());
+                    continue;
+                }
             }
 
-            // Sort products by price (smallest to largest)
+            // Sort products by price
             usort($formatted_products, function ($a, $b) {
                 return $a['price'] - $b['price'];
             });
@@ -758,4 +773,256 @@ class StripeCheckoutIntegration
     }
 }
 
+// At the end of your file, after the closing bracket of StripeCheckoutIntegration class
+// but before the final line that creates the instance
+
+class StripeProductManager {
+    private $parent;
+
+    public function __construct($parent) {
+        $this->parent = $parent;
+        add_action('admin_menu', array($this, 'add_product_manager_page'));
+        add_action('wp_ajax_toggle_stripe_product', array($this, 'toggle_stripe_product'));
+    }
+
+    public function add_product_manager_page() {
+        add_submenu_page(
+            'options-general.php',
+            'Stripe Products',
+            'Stripe Products',
+            'manage_options',
+            'stripe-products',
+            array($this, 'render_product_manager_page')
+        );
+    }
+
+    public function render_product_manager_page() {
+        // Check if API key is set
+        if (empty($this->parent->get_stripe_secret_key())) {
+            ?>
+            <div class="wrap">
+                <h1>Stripe Products</h1>
+                <div class="notice notice-error">
+                    <p>Please set up your Stripe API key in the <a href="<?php echo admin_url('options-general.php?page=stripe-checkout-settings'); ?>">Stripe Checkout Settings</a> before managing products.</p>
+                </div>
+            </div>
+            <?php
+            return;
+        }
+
+        // Get active product IDs
+        $active_products = array_filter(array_map('trim', explode("\n", get_option('stripe_product_ids', ''))));
+
+        try {
+            $this->parent->init_stripe();
+            $products = \Stripe\Product::all([
+                'active' => true, 
+                'limit' => 100,
+                'expand' => ['data.default_price']
+            ]);
+        } catch (\Exception $e) {
+            ?>
+            <div class="wrap">
+                <h1>Stripe Products</h1>
+                <div class="notice notice-error">
+                    <p>Error fetching products: <?php echo esc_html($e->getMessage()); ?></p>
+                </div>
+            </div>
+            <?php
+            return;
+        }
+
+        ?>
+        <div class="wrap">
+            <h1>Stripe Products</h1>
+            
+            <div class="notice notice-info">
+                <p>Select the products you want to display in your store. Changes are saved automatically.</p>
+            </div>
+
+            <div class="search-box" style="margin: 20px 0;">
+                <input type="text" id="productSearch" class="regular-text" 
+                       placeholder="Search products by name or ID..."
+                       style="width: 300px; padding: 8px;">
+            </div>
+
+            <style>
+                .stripe-products-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                .stripe-products-table th, .stripe-products-table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+                .stripe-products-table th { background: #f5f5f5; }
+                .product-image { width: 50px; height: 50px; object-fit: cover; border-radius: 4px; }
+                .price-column { width: 150px; }
+                .toggle-column { width: 100px; }
+                .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
+                .switch input { opacity: 0; width: 0; height: 0; }
+                .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc;
+                    -webkit-transition: .4s; transition: .4s; border-radius: 34px; }
+                .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px;
+                    background-color: white; -webkit-transition: .4s; transition: .4s; border-radius: 50%; }
+                input:checked + .slider { background-color: #2196F3; }
+                input:checked + .slider:before { -webkit-transform: translateX(26px); -ms-transform: translateX(26px);
+                    transform: translateX(26px); }
+                .loading { opacity: 0.5; pointer-events: none; }
+                .no-results { display: none; padding: 20px; text-align: center; background: #f9f9f9; }
+                tr.hidden { display: none; }
+            </style>
+
+            <table class="stripe-products-table">
+                <thead>
+                    <tr>
+                        <th>Image</th>
+                        <th>Product</th>
+                        <th class="price-column">Price</th>
+                        <th class="toggle-column">Show in Store</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($products as $product): 
+                        $price = 'No price set';
+                        $currency = 'USD';
+                        if ($product->default_price) {
+                            $unit_amount = $product->default_price->unit_amount;
+                            $currency = $product->default_price->currency;
+                            $price = $unit_amount ? number_format($unit_amount / 100, 2) : 'No price set';
+                        }
+                        $image_url = !empty($product->images) ? $product->images[0] : 'https://placehold.co/50';
+                        $is_active = in_array($product->id, $active_products);
+                    ?>
+                        <tr data-product-name="<?php echo esc_attr(strtolower($product->name)); ?>" 
+                            data-product-id="<?php echo esc_attr(strtolower($product->id)); ?>">
+                            <td><img src="<?php echo esc_url($image_url); ?>" class="product-image" /></td>
+                            <td>
+                                <strong><?php echo esc_html($product->name); ?></strong>
+                                <br>
+                                <small><?php echo esc_html($product->id); ?></small>
+                            </td>
+                            <td>
+                                <?php if ($price !== 'No price set'): ?>
+                                    $<?php echo esc_html($price); ?>
+                                <?php else: ?>
+                                    <?php echo esc_html($price); ?>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <label class="switch">
+                                    <input type="checkbox" 
+                                           class="product-toggle" 
+                                           data-product-id="<?php echo esc_attr($product->id); ?>"
+                                           <?php checked($is_active); ?>
+                                    >
+                                    <span class="slider"></span>
+                                </label>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <div class="no-results">
+                No products found matching your search.
+            </div>
+
+            <script>
+            jQuery(document).ready(function($) {
+                // Toggle functionality
+                $('.product-toggle').on('change', function() {
+                    const $checkbox = $(this);
+                    const $row = $checkbox.closest('tr');
+                    const productId = $checkbox.data('product-id');
+                    const isActive = $checkbox.prop('checked');
+
+                    $row.addClass('loading');
+
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'toggle_stripe_product',
+                            product_id: productId,
+                            is_active: isActive,
+                            nonce: '<?php echo wp_create_nonce("toggle_stripe_product"); ?>'
+                        },
+                        success: function(response) {
+                            if (!response.success) {
+                                alert('Error updating product status');
+                                $checkbox.prop('checked', !isActive);
+                            }
+                        },
+                        error: function() {
+                            alert('Error updating product status');
+                            $checkbox.prop('checked', !isActive);
+                        },
+                        complete: function() {
+                            $row.removeClass('loading');
+                        }
+                    });
+                });
+
+                // Search functionality
+                $('#productSearch').on('input', function() {
+                    const searchTerm = $(this).val().toLowerCase();
+                    let hasResults = false;
+
+                    $('.stripe-products-table tbody tr').each(function() {
+                        const $row = $(this);
+                        const productName = $row.data('product-name');
+                        const productId = $row.data('product-id');
+                        
+                        if (productName.includes(searchTerm) || productId.includes(searchTerm)) {
+                            $row.removeClass('hidden');
+                            hasResults = true;
+                        } else {
+                            $row.addClass('hidden');
+                        }
+                    });
+
+                    $('.no-results').toggle(!hasResults);
+                });
+            });
+            </script>
+        </div>
+        <?php
+    }
+
+    public function toggle_stripe_product() {
+        check_ajax_referer('toggle_stripe_product', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+
+        $product_id = sanitize_text_field($_POST['product_id']);
+        $is_active = $_POST['is_active'] === 'true';
+
+        // Get current product IDs as array
+        $current_products = array_filter(
+            explode("\n", get_option('stripe_product_ids', '')),
+            'trim'
+        );
+
+        if ($is_active) {
+            // Add product if not already in array
+            if (!in_array($product_id, $current_products)) {
+                $current_products[] = $product_id;
+            }
+        } else {
+            // Remove product if in array
+            $current_products = array_values(array_diff($current_products, [$product_id]));
+        }
+
+        // Convert back to string and update option
+        $updated_products = implode("\n", array_filter($current_products));
+        $success = update_option('stripe_product_ids', $updated_products);
+
+        // Clear the products cache
+        delete_transient('stripe_products_cache');
+
+        if ($success) {
+            wp_send_json_success(['message' => 'Products updated successfully']);
+        } else {
+            wp_send_json_error(['message' => 'Failed to update products']);
+        }
+    }
+}
+// Then modify your existing line at the bottom of the file that creates the instance:
 $stripe_checkout_integration = new StripeCheckoutIntegration();
+$stripe_product_manager = new StripeProductManager($stripe_checkout_integration);
