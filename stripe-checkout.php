@@ -653,9 +653,15 @@ class StripeCheckoutIntegration
             );
 
             $product_descriptions = [];
+            $product_count = 0;
             foreach ($cart as $item) {
+                $product_count += 1;
                 $product = \Stripe\Product::retrieve($item['id']);
                 $product_descriptions[] = "{$item['quantity']}x {$product->name}";
+                if ($product_count > 1) {
+                    $product_descriptions=['Multiple Items'];
+                    break; 
+                }
             }
 
             $session_params = [
