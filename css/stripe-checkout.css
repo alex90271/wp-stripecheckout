@@ -1,3 +1,19 @@
+.store-title {
+    margin-bottom: 1rem;
+}
+
+.store-description {
+    margin-bottom: 2rem;
+}
+
+.store-description h4 {
+    margin: 1rem 0;
+}
+
+.page-header {
+    display: none;
+}
+
 .checkout-container {
     gap: 24px;
     max-width: 1400px;
@@ -5,7 +21,6 @@
     padding: 20px;
 }
 
-/* Product Grid */
 .product-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

@@ -127,6 +127,14 @@ class StripeCheckoutIntegration
             'default' => 10,
             'sanitize_callback' => array($this, 'sanitize_max_quantity')
         ));
+        register_setting('stripe_checkout_options', 'stripe_store_title', array(
+            'default' => 'Store',
+            'sanitize_callback' => 'wp_kses_post'
+        ));
+        register_setting('stripe_checkout_options', 'stripe_store_description', array(
+            'default' => '',
+            'sanitize_callback' => 'wp_kses_post'
+        ));
 
     }
 
@@ -134,11 +142,11 @@ class StripeCheckoutIntegration
     {
         if (!$this->get_store_page_id()) {
             $page_data = array(
-                'post_title' => 'Store',
+                'post_title' => 'Stripe Store',
                 'post_name' => $this->page_slug,
                 'post_status' => 'publish',
                 'post_type' => 'page',
-                'post_content' => '<!-- wp:paragraph -->This page is managed by the Stripe Store plugin.<!-- /wp:paragraph -->'
+                'post_content' => '<!-- wp:paragraph -->This page is managed by the Stripe Store plugin. To modify anything please go to Settings then Stripe Checkout<!-- /wp:paragraph -->'
             );
 
             $page_id = wp_insert_post($page_data);
@@ -183,8 +191,20 @@ class StripeCheckoutIntegration
                 return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know.</p><p><a href="/store">Return to store</a></p>';
             }
 
-            return '<div class="checkout-container" id="stripe-checkout-container">
-                <div class="products">
+            $store_title = get_option('stripe_store_title', 'Store');
+            $store_description = get_option('stripe_store_description', '');
+
+            $output = '<div class="checkout-container" id="stripe-checkout-container">';
+
+            if (!empty($store_title)) {
+                $output .= '<h1 class="store-title">' . wp_kses_post($store_title) . '</h1>';
+            }
+
+            if (!empty($store_description)) {
+                $output .= '<div class="store-description">' . wp_kses_post($store_description) . '</div>';
+            }
+
+            $output .= '<div class="products">
                     <h2>Products</h2>
                     <div class="product-grid" id="product-list"></div>
                 </div>
@@ -194,6 +214,8 @@ class StripeCheckoutIntegration
                     <button id="checkout-button" class="btn btn-filled">Checkout</button>
                 </div>
             </div>';
+
+            return $output;
         }
         return $content;
     }
@@ -301,7 +323,33 @@ class StripeCheckoutIntegration
                         </td>
                     </tr>
                 </table>
-                <!-- Add this new section before the closing form tag -->
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Store Page Title</th>
+                        <td>
+                            <input type="text" name="stripe_store_title"
+                                value="<?php echo esc_attr(get_option('stripe_store_title', 'Store')); ?>"
+                                class="regular-text" />
+                            <p class="description">Enter the title to display at the top of your store page</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Store Description</th>
+                        <td>
+                            <?php
+                            $description = get_option('stripe_store_description', '');
+                            wp_editor($description, 'stripe_store_description', array(
+                                'textarea_name' => 'stripe_store_description',
+                                'textarea_rows' => 5,
+                                'media_buttons' => false,
+                                'teeny' => true,
+                                'quicktags' => true
+                            ));
+                            ?>
+                            <p class="description">Enter a description to display below the title (HTML tags allowed)</p>
+                        </td>
+                    </tr>
+                </table>
                 <h2>Checkout Messages</h2>
                 <table class="form-table">
                     <tr valign="top">
@@ -659,16 +707,16 @@ class StripeCheckoutIntegration
                 $product = \Stripe\Product::retrieve($item['id']);
                 $product_descriptions[] = "{$item['quantity']}x {$product->name}";
                 if ($product_count > 1) {
-                    $product_descriptions=['Multiple Items'];
-                    break; 
+                    $product_descriptions = ['Multiple Items'];
+                    break;
                 }
             }
 
             $session_params = [
                 'line_items' => $line_items,
                 'mode' => 'payment',
-                'success_url' => home_url('/store?checkout=success'),
-                'cancel_url' => home_url('/store?checkout=cancelled'),
+                'success_url' => home_url('/stripe-store?checkout=success'),
+                'cancel_url' => home_url('/stripe-store?checkout=cancelled'),
                 'phone_number_collection' => [
                     'enabled' => true,
                 ],
@@ -782,16 +830,19 @@ class StripeCheckoutIntegration
 // At the end of your file, after the closing bracket of StripeCheckoutIntegration class
 // but before the final line that creates the instance
 
-class StripeProductManager {
+class StripeProductManager
+{
     private $parent;
 
-    public function __construct($parent) {
+    public function __construct($parent)
+    {
         $this->parent = $parent;
         add_action('admin_menu', array($this, 'add_product_manager_page'));
         add_action('wp_ajax_toggle_stripe_product', array($this, 'toggle_stripe_product'));
     }
 
-    public function add_product_manager_page() {
+    public function add_product_manager_page()
+    {
         add_submenu_page(
             'options-general.php',
             'Stripe Products',
@@ -802,14 +853,17 @@ class StripeProductManager {
         );
     }
 
-    public function render_product_manager_page() {
+    public function render_product_manager_page()
+    {
         // Check if API key is set
         if (empty($this->parent->get_stripe_secret_key())) {
             ?>
             <div class="wrap">
                 <h1>Stripe Products</h1>
                 <div class="notice notice-error">
-                    <p>Please set up your Stripe API key in the <a href="<?php echo admin_url('options-general.php?page=stripe-checkout-settings'); ?>">Stripe Checkout Settings</a> before managing products.</p>
+                    <p>Please set up your Stripe API key in the <a
+                            href="<?php echo admin_url('options-general.php?page=stripe-checkout-settings'); ?>">Stripe Checkout
+                            Settings</a> before managing products.</p>
                 </div>
             </div>
             <?php
@@ -822,7 +876,7 @@ class StripeProductManager {
         try {
             $this->parent->init_stripe();
             $products = \Stripe\Product::all([
-                'active' => true, 
+                'active' => true,
                 'limit' => 100,
                 'expand' => ['data.default_price']
             ]);
@@ -841,36 +895,113 @@ class StripeProductManager {
         ?>
         <div class="wrap">
             <h1>Stripe Products</h1>
-            
+
             <div class="notice notice-info">
                 <p>Select the products you want to display in your store. Changes are saved automatically.</p>
             </div>
 
             <div class="search-box" style="margin: 20px 0;">
-                <input type="text" id="productSearch" class="regular-text" 
-                       placeholder="Search products by name or ID..."
-                       style="width: 300px; padding: 8px;">
+                <input type="text" id="productSearch" class="regular-text" placeholder="Search products by name or ID..."
+                    style="width: 300px; padding: 8px;">
             </div>
 
             <style>
-                .stripe-products-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                .stripe-products-table th, .stripe-products-table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-                .stripe-products-table th { background: #f5f5f5; }
-                .product-image { width: 50px; height: 50px; object-fit: cover; border-radius: 4px; }
-                .price-column { width: 150px; }
-                .toggle-column { width: 100px; }
-                .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
-                .switch input { opacity: 0; width: 0; height: 0; }
-                .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc;
-                    -webkit-transition: .4s; transition: .4s; border-radius: 34px; }
-                .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px;
-                    background-color: white; -webkit-transition: .4s; transition: .4s; border-radius: 50%; }
-                input:checked + .slider { background-color: #2196F3; }
-                input:checked + .slider:before { -webkit-transform: translateX(26px); -ms-transform: translateX(26px);
-                    transform: translateX(26px); }
-                .loading { opacity: 0.5; pointer-events: none; }
-                .no-results { display: none; padding: 20px; text-align: center; background: #f9f9f9; }
-                tr.hidden { display: none; }
+                .stripe-products-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 20px;
+                }
+
+                .stripe-products-table th,
+                .stripe-products-table td {
+                    padding: 12px;
+                    text-align: left;
+                    border-bottom: 1px solid #ddd;
+                }
+
+                .stripe-products-table th {
+                    background: #f5f5f5;
+                }
+
+                .product-image {
+                    width: 50px;
+                    height: 50px;
+                    object-fit: cover;
+                    border-radius: 4px;
+                }
+
+                .price-column {
+                    width: 150px;
+                }
+
+                .toggle-column {
+                    width: 100px;
+                }
+
+                .switch {
+                    position: relative;
+                    display: inline-block;
+                    width: 60px;
+                    height: 34px;
+                }
+
+                .switch input {
+                    opacity: 0;
+                    width: 0;
+                    height: 0;
+                }
+
+                .slider {
+                    position: absolute;
+                    cursor: pointer;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: #ccc;
+                    -webkit-transition: .4s;
+                    transition: .4s;
+                    border-radius: 34px;
+                }
+
+                .slider:before {
+                    position: absolute;
+                    content: "";
+                    height: 26px;
+                    width: 26px;
+                    left: 4px;
+                    bottom: 4px;
+                    background-color: white;
+                    -webkit-transition: .4s;
+                    transition: .4s;
+                    border-radius: 50%;
+                }
+
+                input:checked+.slider {
+                    background-color: #2196F3;
+                }
+
+                input:checked+.slider:before {
+                    -webkit-transform: translateX(26px);
+                    -ms-transform: translateX(26px);
+                    transform: translateX(26px);
+                }
+
+                .loading {
+                    opacity: 0.5;
+                    pointer-events: none;
+                }
+
+                .no-results {
+                    display: none;
+                    padding: 20px;
+                    text-align: center;
+                    background: #f9f9f9;
+                }
+
+                tr.hidden {
+                    display: none;
+                }
             </style>
 
             <table class="stripe-products-table">
@@ -883,7 +1014,7 @@ class StripeProductManager {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($products as $product): 
+                    <?php foreach ($products as $product):
                         $price = 'No price set';
                         $currency = 'USD';
                         if ($product->default_price) {
@@ -893,8 +1024,8 @@ class StripeProductManager {
                         }
                         $image_url = !empty($product->images) ? $product->images[0] : 'https://placehold.co/50';
                         $is_active = in_array($product->id, $active_products);
-                    ?>
-                        <tr data-product-name="<?php echo esc_attr(strtolower($product->name)); ?>" 
+                        ?>
+                        <tr data-product-name="<?php echo esc_attr(strtolower($product->name)); ?>"
                             data-product-id="<?php echo esc_attr(strtolower($product->id)); ?>">
                             <td><img src="<?php echo esc_url($image_url); ?>" class="product-image" /></td>
                             <td>
@@ -911,11 +1042,8 @@ class StripeProductManager {
                             </td>
                             <td>
                                 <label class="switch">
-                                    <input type="checkbox" 
-                                           class="product-toggle" 
-                                           data-product-id="<?php echo esc_attr($product->id); ?>"
-                                           <?php checked($is_active); ?>
-                                    >
+                                    <input type="checkbox" class="product-toggle"
+                                        data-product-id="<?php echo esc_attr($product->id); ?>" <?php checked($is_active); ?>>
                                     <span class="slider"></span>
                                 </label>
                             </td>
@@ -928,68 +1056,69 @@ class StripeProductManager {
             </div>
 
             <script>
-            jQuery(document).ready(function($) {
-                // Toggle functionality
-                $('.product-toggle').on('change', function() {
-                    const $checkbox = $(this);
-                    const $row = $checkbox.closest('tr');
-                    const productId = $checkbox.data('product-id');
-                    const isActive = $checkbox.prop('checked');
+                jQuery(document).ready(function ($) {
+                    // Toggle functionality
+                    $('.product-toggle').on('change', function () {
+                        const $checkbox = $(this);
+                        const $row = $checkbox.closest('tr');
+                        const productId = $checkbox.data('product-id');
+                        const isActive = $checkbox.prop('checked');
 
-                    $row.addClass('loading');
+                        $row.addClass('loading');
 
-                    $.ajax({
-                        url: ajaxurl,
-                        type: 'POST',
-                        data: {
-                            action: 'toggle_stripe_product',
-                            product_id: productId,
-                            is_active: isActive,
-                            nonce: '<?php echo wp_create_nonce("toggle_stripe_product"); ?>'
-                        },
-                        success: function(response) {
-                            if (!response.success) {
+                        $.ajax({
+                            url: ajaxurl,
+                            type: 'POST',
+                            data: {
+                                action: 'toggle_stripe_product',
+                                product_id: productId,
+                                is_active: isActive,
+                                nonce: '<?php echo wp_create_nonce("toggle_stripe_product"); ?>'
+                            },
+                            success: function (response) {
+                                if (!response.success) {
+                                    alert('Error updating product status');
+                                    $checkbox.prop('checked', !isActive);
+                                }
+                            },
+                            error: function () {
                                 alert('Error updating product status');
                                 $checkbox.prop('checked', !isActive);
+                            },
+                            complete: function () {
+                                $row.removeClass('loading');
                             }
-                        },
-                        error: function() {
-                            alert('Error updating product status');
-                            $checkbox.prop('checked', !isActive);
-                        },
-                        complete: function() {
-                            $row.removeClass('loading');
-                        }
-                    });
-                });
-
-                // Search functionality
-                $('#productSearch').on('input', function() {
-                    const searchTerm = $(this).val().toLowerCase();
-                    let hasResults = false;
-
-                    $('.stripe-products-table tbody tr').each(function() {
-                        const $row = $(this);
-                        const productName = $row.data('product-name');
-                        const productId = $row.data('product-id');
-                        
-                        if (productName.includes(searchTerm) || productId.includes(searchTerm)) {
-                            $row.removeClass('hidden');
-                            hasResults = true;
-                        } else {
-                            $row.addClass('hidden');
-                        }
+                        });
                     });
 
-                    $('.no-results').toggle(!hasResults);
+                    // Search functionality
+                    $('#productSearch').on('input', function () {
+                        const searchTerm = $(this).val().toLowerCase();
+                        let hasResults = false;
+
+                        $('.stripe-products-table tbody tr').each(function () {
+                            const $row = $(this);
+                            const productName = $row.data('product-name');
+                            const productId = $row.data('product-id');
+
+                            if (productName.includes(searchTerm) || productId.includes(searchTerm)) {
+                                $row.removeClass('hidden');
+                                hasResults = true;
+                            } else {
+                                $row.addClass('hidden');
+                            }
+                        });
+
+                        $('.no-results').toggle(!hasResults);
+                    });
                 });
-            });
             </script>
         </div>
         <?php
     }
 
-    public function toggle_stripe_product() {
+    public function toggle_stripe_product()
+    {
         check_ajax_referer('toggle_stripe_product', 'nonce');
 
         if (!current_user_can('manage_options')) {
