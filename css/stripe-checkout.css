@@ -211,4 +211,8 @@
         width: 100%;
         justify-content: space-between;
     }
+
+    .quantity-controls {
+        margin-top: 7.5px;
+    }
 }
