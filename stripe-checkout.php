@@ -188,7 +188,7 @@ class StripeCheckoutIntegration
             }
 
             if (isset($_GET['checkout']) && $_GET['checkout'] === 'success') {
-                return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know.</p><p><a href="/store">Return to store</a></p>';
+                return '<p>Thank you for your purchase! If you do not receive a Stripe receipt via email, please let us know.</p><p><a href="/stripe-store">Return to store</a></p>';
             }
 
             $store_title = get_option('stripe_store_title', 'Store');
