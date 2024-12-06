@@ -793,8 +793,8 @@ class StripeCheckoutIntegration
     public function enqueue_scripts()
     {
         if (is_page() && get_the_ID() == $this->get_store_page_id()) {
-            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), rand(10, 100), true);
-            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', rand(10, 100));
+            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), strval(time()), true);
+            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', strval(time()));
 
             $this->fetch_shipping_rate_info();
 
