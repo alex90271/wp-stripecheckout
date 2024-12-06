@@ -83,7 +83,6 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     position: sticky;
     top: 24px;
-    max-height: calc(100vh - 48px);
     overflow-y: auto;
 }
 
