@@ -438,7 +438,7 @@ class StripeCheckoutIntegration
             <form method="post" action="">
                 <?php wp_nonce_field('clear_stripe_cache_nonce'); ?>
                 <p>
-                    <span class="description">Manually clear products and image cache. Cache automatically refreshes every 72
+                    <span class="description">Clear products and image cache. You will need to clear the website hosting cache (if applicable)
                         hours<br></span>
                     <input type="submit" name="clear_stripe_cache" class="button button-secondary" value="Clear Stripe Cache">
                 </p>
