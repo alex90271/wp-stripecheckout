@@ -293,7 +293,7 @@ class StripeWebhookHandler
             "New Stripe Charge!\nDate: %s\nTotal Amount: $%s\nDescription: %s\nID: %s",
             $date,
             $amount,
-            $order_details,
+            $order_details['description'],
             sanitize_text_field($session->payment_intent)
         );
 
