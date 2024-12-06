@@ -472,7 +472,7 @@ class StripeCheckoutIntegration
                         'currency' => $shipping_rate->fixed_amount->currency,
                         'display_name' => $shipping_rate->display_name
                     ];
-                    set_transient($cache_key, $this->shipping_rate_info, 259200); // Cache for 1 hour
+                    set_transient($cache_key, $this->shipping_rate_info);
                 } catch (\Exception $e) {
                     error_log('Error fetching shipping rate: ' . $e->getMessage());
                     $this->shipping_rate_info = null;
@@ -502,7 +502,6 @@ class StripeCheckoutIntegration
     {
         check_ajax_referer('fetch_products_nonce');
         $cache_key = 'stripe_products_cache';
-        $cache_expiration = 259200; // Cache for 72 hours
 
         // Try to get cached products
         $cached_products = get_transient($cache_key);
@@ -561,7 +560,7 @@ class StripeCheckoutIntegration
             });
 
             // Cache the formatted products
-            set_transient($cache_key, $formatted_products, $cache_expiration);
+            set_transient($cache_key, $formatted_products);
 
             wp_send_json_success($formatted_products);
         } catch (\Exception $e) {
@@ -664,7 +663,7 @@ class StripeCheckoutIntegration
                     return $p['id'] !== $product_id;
                 });
                 $cached_products[] = $product_data;
-                set_transient($cache_key, $cached_products, 86400); // Update cache for 24 hour
+                set_transient($cache_key, $cached_products);
             }
 
             wp_send_json_success($product_data);
