@@ -2,13 +2,15 @@
 /**
  * Plugin Name: Simple Stripe Checkout
  * Description: Integrates Stripe Checkout Sessions with WordPress, using products and shipping ID from Stripe.
- * Version: 2.0
+ * Version: 3.1
  * Author: Alex Alder
  */
 
 if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly
 }
+
+$VER = 3.1;
 
 // Include Stripe PHP library
 require_once(plugin_dir_path(__FILE__) . 'stripe-php/init.php');
@@ -792,8 +794,8 @@ class StripeCheckoutIntegration
     public function enqueue_scripts()
     {
         if (is_page() && get_the_ID() == $this->get_store_page_id()) {
-            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), strval(time()), true);
-            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', strval(time()));
+            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), 3.1, true);
+            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', 3.1);
 
             $this->fetch_shipping_rate_info();
 
