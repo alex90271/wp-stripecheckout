@@ -78,14 +78,13 @@ class StripeWebhookHandler
             if (!empty($stripe_secret_key)) {
                 \Stripe\Stripe::setApiKey($stripe_secret_key);
             }
-
-            // Get line items from the session
+    
+            // Get line items and create description
             $line_items = \Stripe\Checkout\Session::retrieve([
                 'id' => $session->id,
                 'expand' => ['line_items'],
             ])->line_items;
-
-            // Format order details
+    
             $product_descriptions = [];
             foreach ($line_items->data as $item) {
                 $product_descriptions[] = sprintf(
@@ -93,43 +92,39 @@ class StripeWebhookHandler
                     $item->quantity,
                     sanitize_text_field($item->description)
                 );
-
-                // If we have more than 3 items, just return "Multiple Items"
+    
                 if (count($product_descriptions) > 3) {
-                    $description = 'Multiple Items';
+                    $description = 'Multiple Items (3+)';
                     break;
                 }
             }
-
-            // If we haven't hit the limit, join the descriptions
+    
             if (count($product_descriptions) <= 3) {
                 $description = implode(', ', $product_descriptions);
             }
-
-            // Get payment intent with receipt URL
+    
             $receipt_url = '';
+            // Single update of payment intent and retrieval of receipt URL
             if ($session->payment_intent) {
-                $payment_intent = \Stripe\PaymentIntent::update(
+                \Stripe\PaymentIntent::update(
                     $session->payment_intent,
                     ['description' => $description]
                 );
-
-                // Retrieve the payment intent to get the charge details
+    
                 $payment_intent = \Stripe\PaymentIntent::retrieve([
                     'id' => $session->payment_intent,
                     'expand' => ['latest_charge']
                 ]);
-
-                if ($payment_intent->latest_charge) {
-                    $receipt_url = $payment_intent->latest_charge->receipt_url;
-                }
+    
+                $receipt_url = $payment_intent->latest_charge ? $payment_intent->latest_charge->receipt_url : '';
+                $description = $payment_intent->description;
             }
-
+    
             return [
                 'description' => $description,
                 'receipt_url' => $receipt_url
             ];
-
+    
         } catch (\Stripe\Exception\ApiErrorException $e) {
             error_log('Error processing order details: ' . $this->safe_log_data($e->getMessage()));
             return [
@@ -138,7 +133,6 @@ class StripeWebhookHandler
             ];
         }
     }
-
     public function handle_webhook($request)
     {
         try {
@@ -247,8 +241,7 @@ class StripeWebhookHandler
                 <p><strong>Total Amount:</strong> $%s</p>
                 <p><strong>Order Details:</strong> %s</p>
                 <p><strong>Stripe ID:</strong> %s</p>
-                <p><strong>Stripe Receipt: </strong> %s</p>
-                <p><strong><a href="https://dashboard.stripe.com/payments/%s">View in Stripe</a></strong></p>
+                <p><strong><a href="%s">Stripe Receipt</a> | <a href="https://dashboard.stripe.com/payments/%s">View in Dashboard</a></strong></p>
             </body>
             </html>',
             esc_html($date),
@@ -290,10 +283,9 @@ class StripeWebhookHandler
 
         // Format message with order details
         $message = sprintf(
-            "New Stripe Charge!\nDate: %s\nTotal Amount: $%s\nDescription: %s\nID: %s",
+            "New Stripe Charge!\nDate: %s\nTotal Amount: $%s\nID: %s",
             $date,
             $amount,
-            $order_details['description'],
             sanitize_text_field($session->payment_intent)
         );
 
