@@ -438,7 +438,8 @@ class StripeCheckoutIntegration
             <form method="post" action="">
                 <?php wp_nonce_field('clear_stripe_cache_nonce'); ?>
                 <p>
-                    <span class="description">Clear products and image cache. You will need to clear the website hosting cache (if applicable)
+                    <span class="description">Clear products and image cache. You will need to clear the website hosting cache
+                        (if applicable)
                         hours<br></span>
                     <input type="submit" name="clear_stripe_cache" class="button button-secondary" value="Clear Stripe Cache">
                 </p>
@@ -455,12 +456,11 @@ class StripeCheckoutIntegration
         }
     }
 
-    public function fetch_shipping_rate_info()
-    {
+    public function fetch_shipping_rate_info() {
         if (!empty($this->shipping_rate_id)) {
             $cache_key = 'stripe_shipping_rate_info';
             $cached_info = get_transient($cache_key);
-
+    
             if ($cached_info !== false) {
                 $this->shipping_rate_info = $cached_info;
             } else {
@@ -472,7 +472,7 @@ class StripeCheckoutIntegration
                         'currency' => $shipping_rate->fixed_amount->currency,
                         'display_name' => $shipping_rate->display_name
                     ];
-                    set_transient($cache_key, $this->shipping_rate_info);
+                    set_transient($cache_key, $this->shipping_rate_info, 21600);
                 } catch (\Exception $e) {
                     error_log('Error fetching shipping rate: ' . $e->getMessage());
                     $this->shipping_rate_info = null;
@@ -497,7 +497,6 @@ class StripeCheckoutIntegration
         }
     }
 
-    // Update the fetch_stripe_products function in your StripeCheckoutIntegration class
     public function fetch_stripe_products()
     {
         check_ajax_referer('fetch_products_nonce');
@@ -559,8 +558,8 @@ class StripeCheckoutIntegration
                 return $a['price'] - $b['price'];
             });
 
-            // Cache the formatted products
-            set_transient($cache_key, $formatted_products);
+            // Cache the formatted products for 6 hours
+            set_transient($cache_key, $formatted_products, 21600);
 
             wp_send_json_success($formatted_products);
         } catch (\Exception $e) {
