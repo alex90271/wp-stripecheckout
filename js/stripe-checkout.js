@@ -1,51 +1,116 @@
 (function ($) {
-    if (stripe_checkout_vars.store_disabled == '1') {
-        return;
-    }
-
+    // Constants
+    const AJAX_TIMEOUT = 15000; // 15 seconds
+    const MAX_RETRIES = 2;
+    
+    // State management
     let cart = {};
     let shippingRate = null;
     let productCache = {};
+    let isLoading = false;
+    let retryCount = 0;
+
+    function initializeStore() {
+        // Ensure required variables exist
+        if (typeof stripe_checkout_vars === 'undefined') {
+            console.error('Stripe checkout variables not loaded');
+            showError('Store configuration error. Please refresh the page.');
+            return;
+        }
+
+        if (stripe_checkout_vars.store_disabled == '1') {
+            return;
+        }
+
+        fetchProducts();
+        initShippingRate();
+        updateCartEfficiently();
+    }
+
+    function showError(message) {
+        const productList = $('#product-list');
+        productList.html(`<div class="store-error-message">${message}</div>`);
+    }
+
+    function showLoading() {
+        if (!isLoading) {
+            isLoading = true;
+            const productList = $('#product-list');
+            productList.html('<div class="store-loading-indicator">Loading products...</div>');
+        }
+    }
+
+    function hideLoading() {
+        isLoading = false;
+    }
 
     function fetchProducts() {
+        if (isLoading) return;
+
+        showLoading();
+
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
+            timeout: AJAX_TIMEOUT,
             data: {
                 action: 'fetch_stripe_products',
                 _ajax_nonce: stripe_checkout_vars.fetch_products_nonce
             },
             success: function (response) {
-                if (response.success) {
+                if (response.success && Array.isArray(response.data)) {
+                    retryCount = 0; // Reset retry count on success
                     response.data.forEach(product => {
                         productCache[product.id] = product;
                     });
                     displayProducts(response.data);
                 } else {
-                    console.error('Error fetching products:', response.data);
+                    handleFetchError('Invalid product data received');
                 }
+            },
+            error: function (xhr, status, error) {
+                handleFetchError(`Failed to load products: ${error}`);
+            },
+            complete: function() {
+                hideLoading();
             }
         });
+    }
+
+    function handleFetchError(error) {
+        console.error('Product fetch error:', error);
+        
+        if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`Retrying product fetch (attempt ${retryCount})`);
+            setTimeout(fetchProducts, 2000 * retryCount); // Exponential backoff
+        } else {
+            showError('Unable to load products. Please refresh the page or try again later.');
+        }
     }
 
     function displayProducts(products) {
         const productList = $('#product-list');
         productList.empty();
 
-        if (products.length === 0) {
-            productList.append('<p>No products available at the moment.</p>');
+        if (!Array.isArray(products) || products.length === 0) {
+            productList.html('<p>No products available at the moment.</p>');
             return;
         }
 
         productList.addClass('product-grid');
 
         products.forEach(product => {
+            if (!product || !product.id) {
+                console.error('Invalid product data:', product);
+                return;
+            }
+
             const priceDisplay = product.price
                 ? `${formatPrice(product.price, product.currency)}`
                 : 'Price not available';
 
             const imageUrl = product.image || 'https://placehold.co/600x400/000000/FFFFFF.png';
-
             const quantity = cart[product.id] ? cart[product.id].quantity : 0;
             const buttonText = quantity > 0 ? `Add to Cart (${quantity})` : 'Add to Cart';
 
@@ -55,7 +120,7 @@
                     <h4>${product.name}</h4>
                     <p class="product-description">${product.description || ''}</p>
                     <p class="product-price">${priceDisplay}</p>
-                    ${product.price ? `<button class="add-to-cart btn btn-white" data-product-id="${product.id}">${buttonText}</button>` : ''}
+                    ${product.price ? `<button class="store-button add-to-cart" data-product-id="${product.id}">${buttonText}</button>` : ''}
                 </div>
             `);
         });
@@ -75,6 +140,8 @@
 
         Object.keys(cart).forEach(productId => {
             const product = productCache[productId];
+            if (!product) return; // Skip if product not found in cache
+            
             const quantity = cart[productId].quantity;
             subtotal += product.price * quantity;
 
@@ -84,11 +151,11 @@
                         <span class="cart-item-name"><strong>${quantity}x</strong> ${product.name} | <i>($${(product.price/100).toFixed(2)} each)</i></span>
                     </div>
                     <div class="quantity-controls">
-                            <button class="quantity-btn decrease" data-product-id="${productId}">-</button>
-                            <span class="quantity-display">${quantity}</span>
-                            <button class="quantity-btn increase" data-product-id="${productId}">+</button>
+                        <button class="store-button quantity-btn decrease" data-product-id="${productId}">-</button>
+                        <span class="quantity-display">${quantity}</span>
+                        <button class="store-button quantity-btn increase" data-product-id="${productId}">+</button>
                     </div>
-                    <button class="remove-item" data-product-id="${productId}" title="Remove item">×</button>
+                    <button class="store-button remove-item" data-product-id="${productId}" title="Remove item">×</button>
                 </div>
             `;
         });
@@ -186,6 +253,7 @@
         };
     }
 
+    // Event Handlers
     $(document).on('click', '.add-to-cart', function (e) {
         e.preventDefault();
         const productId = $(this).data('product-id');
@@ -215,7 +283,7 @@
 
     $('#checkout-button').on('click', function () {
         const button = $(this);
-        button.prop('disabled', true).text('Processing...');
+        button.prop('disabled', true).addClass('store-button-disabled').text('Processing...');
 
         const cartArray = Object.values(cart).map(item => ({
             id: item.id,
@@ -225,30 +293,41 @@
         $.ajax({
             url: stripe_checkout_vars.ajax_url,
             type: 'POST',
+            timeout: AJAX_TIMEOUT,
             data: {
                 action: 'create_checkout_session',
                 _ajax_nonce: stripe_checkout_vars.checkout_nonce,
                 cart: JSON.stringify(cartArray)
             },
             success: function (response) {
-                if (response.success) {
+                if (response.success && response.data && response.data.url) {
                     window.location.href = response.data.url;
                 } else {
-                    console.error('Error creating checkout session:', response.data);
-                    button.prop('disabled', false).text('Checkout');
-                    alert('There was an error processing your checkout. Please try again.');
+                    console.error('Invalid checkout response:', response);
+                    handleCheckoutError(button);
                 }
             },
-            error: function () {
-                button.prop('disabled', false).text('Checkout');
-                alert('There was an error processing your checkout. Please try again.');
+            error: function (xhr, status, error) {
+                console.error('Checkout error:', error);
+                handleCheckoutError(button);
             }
         });
     });
 
-    $(document).ready(function () {
-        fetchProducts();
-        initShippingRate();
-        updateCartEfficiently();
+    function handleCheckoutError(button) {
+        button.prop('disabled', false)
+             .removeClass('store-button-disabled')
+             .text('Checkout');
+        alert('There was an error processing your checkout. Please try again.');
+    }
+
+    // Initialize when document is ready and stripe_checkout_vars is available
+    $(document).ready(function() {
+        if (document.readyState === 'complete') {
+            initializeStore();
+        } else {
+            // Wait for everything to load if document not complete
+            $(window).on('load', initializeStore);
+        }
     });
 })(jQuery);
