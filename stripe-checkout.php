@@ -24,12 +24,15 @@ class StripeCheckoutIntegration
     private $encryption_key;
     private $product_ids;
     private $webhook_handler;
+    public $VER;
 
 
     public function __construct()
     {
         // Generate or retrieve the encryption key
         $this->encryption_key = $this->get_encryption_key();
+
+        $this->VER = 3.1;
 
         // Initialize properties
         $this->shipping_rate_id = get_option('stripe_shipping_rate_id');
@@ -794,8 +797,8 @@ class StripeCheckoutIntegration
     public function enqueue_scripts()
     {
         if (is_page() && get_the_ID() == $this->get_store_page_id()) {
-            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), 3.1, true);
-            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', 3.1);
+            wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), $this->VER, true);
+            wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', $this->VER);
 
             $this->fetch_shipping_rate_info();
 
