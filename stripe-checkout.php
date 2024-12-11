@@ -10,8 +10,6 @@ if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly
 }
 
-$VER = 3.1;
-
 // Include Stripe PHP library
 require_once(plugin_dir_path(__FILE__) . 'stripe-php/init.php');
 
@@ -196,15 +194,17 @@ class StripeCheckoutIntegration
             $store_title = get_option('stripe_store_title', 'Store');
             $store_description = get_option('stripe_store_description', '');
 
-            $output = '<div class="checkout-container" id="stripe-checkout-container">';
+            $output = '<div>';
 
             if (!empty($store_title)) {
                 $output .= '<h1 class="store-title">' . wp_kses_post($store_title) . '</h1>';
             }
 
             if (!empty($store_description)) {
-                $output .= '<div class="store-description">' . wp_kses_post($store_description) . '</div>';
+                $output .= '<div class="store-description">' . wp_kses_post($store_description) . '</div></div>';
             }
+
+            $output .= '<div class="checkout-container" id="stripe-checkout-container">';
 
             $output .= '<div class="products">
                     <h2>Products</h2>

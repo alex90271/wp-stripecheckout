@@ -213,8 +213,6 @@
     max-width: 1200px;
     margin: 0 auto;
     padding: 20px;
-    display: grid;
-    grid-template-columns: 2fr 1fr;
     gap: 30px;
 }
 
@@ -332,6 +330,10 @@
     background-color: #fee2e2;
 }
 
+.cart-item-details {
+    margin: 15px
+}
+
 .cart-subtotal,
 .cart-shipping,
 .cart-total {
@@ -353,9 +355,6 @@
 }
 
 @media (max-width: 768px) {
-    .checkout-container {
-        grid-template-columns: 1fr;
-    }
 
     .cart {
         position: static;
