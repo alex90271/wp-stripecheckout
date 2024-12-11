@@ -6,7 +6,7 @@
     gap: 30px;
 }
 
-.page-header {
+.entry-title {
     display: none;
 }
 
@@ -106,6 +106,7 @@
     padding: 10px 20px;
     border-radius: 6px;
     transition: background-color 0.2s;
+    border: 1px solid black;
 }
 
 /* Cart Styles */
