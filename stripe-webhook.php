@@ -161,6 +161,8 @@ class StripeWebhookHandler
             if ($event->type === 'checkout.session.completed') {
                 $session = $event->data->object;
 
+                $order_details = $this->get_order_details($session);
+
                 // Send email notification
                 $to = get_option('admin_email');
                 if (!empty($to)) {
@@ -169,7 +171,7 @@ class StripeWebhookHandler
                         ->setTimezone($timezone)
                         ->format('m/d/Y');
                     $subject = "New Stripe Order: " . $date . "";
-                    $message = $this->prepare_email_content($session);
+                    $message = $this->prepare_email_content($session, $order_details);
                     $headers = array('Content-Type: text/html; charset=UTF-8');
 
                     $mail_result = wp_mail($to, $subject, $message, $headers);
@@ -180,7 +182,7 @@ class StripeWebhookHandler
 
                 // Send GroupMe notification if enabled
                 if (get_option('enable_groupme_notifications') == 1) {
-                    $this->send_groupme_message($session);
+                    $this->send_groupme_message($session, $order_details);
                 }
             }
 
@@ -213,11 +215,10 @@ class StripeWebhookHandler
         );
     }
 
-    private function prepare_email_content($session)
+    private function prepare_email_content($session, $order_details)
     {
         $customer = $this->sanitize_customer_data($session->customer_details);
         $payment_intent = sanitize_text_field($session->payment_intent);
-        $order_details = $this->get_order_details($session);
 
         try {
             $timezone = new DateTimeZone(get_option('stripe_timezone', 'America/Denver'));
@@ -257,7 +258,7 @@ class StripeWebhookHandler
         return $content;
     }
 
-    function send_groupme_message($session)
+    function send_groupme_message($session, $order_details)
     {
         $bot_id = get_option('groupme_bot_id');
         if (empty($bot_id)) {
@@ -276,15 +277,15 @@ class StripeWebhookHandler
         }
 
         $customer = $this->sanitize_customer_data($session->customer_details);
-        $order_details = $this->get_order_details($session);
 
         $amount = isset($session->amount_total) ?
             number_format(abs((float) $session->amount_total) / 100, 2) : '0.00';
 
         // Format message with order details
         $message = sprintf(
-            "New Stripe Charge!\nDate: %s\nTotal Amount: $%s\nID: %s",
+            "New Stripe Charge!\nDate: %s\nDescription: %s\nTotal Amount: $%s\nID: %s",
             $date,
+            $order_details['description'],
             $amount,
             sanitize_text_field($session->payment_intent)
         );
