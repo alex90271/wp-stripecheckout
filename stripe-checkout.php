@@ -46,6 +46,12 @@ class StripeCheckoutIntegration
         add_action('rest_api_init', array($this->webhook_handler, 'register_webhook_endpoint'));
         add_action('admin_init', array($this, 'handle_clear_cache_button'));
 
+        // Register cron event
+        add_action('init', array($this, 'register_cron_refresh'));
+        add_action('stripe_refresh_data', array($this, 'refresh_expired_data'));
+        
+        // Register deactivation hook to clean up cron
+        register_deactivation_hook(__FILE__, array($this, 'deactivate_cron_refresh'));
 
         register_activation_hook(__FILE__, array($this, 'plugin_activation'));
         register_deactivation_hook(__FILE__, array($this, 'plugin_deactivation'));
@@ -461,11 +467,12 @@ class StripeCheckoutIntegration
         }
     }
 
-    public function fetch_shipping_rate_info() {
+    public function fetch_shipping_rate_info()
+    {
         if (!empty($this->shipping_rate_id)) {
             $cache_key = 'stripe_shipping_rate_info';
             $cached_info = get_transient($cache_key);
-    
+
             if ($cached_info !== false) {
                 $this->shipping_rate_info = $cached_info;
             } else {
@@ -811,6 +818,88 @@ class StripeCheckoutIntegration
                 'fetch_products_nonce' => wp_create_nonce('fetch_products_nonce'),
                 'checkout_nonce' => wp_create_nonce('checkout_nonce')
             ));
+        }
+    }
+    public function register_cron_refresh()
+    {
+        if (!wp_next_scheduled('stripe_refresh_data')) {
+            wp_schedule_event(time(), 'hourly', 'stripe_refresh_data');
+        }
+    }
+
+    public function deactivate_cron_refresh()
+    {
+        wp_clear_scheduled_hook('stripe_refresh_data');
+    }
+
+    public function refresh_expired_data()
+    {
+        // Check and refresh products cache if expired
+        $products_cache = get_transient('stripe_products_cache');
+        if ($products_cache === false) {
+            try {
+                $this->init_stripe();
+                $product_ids = array_filter(
+                    explode("\n", get_option('stripe_product_ids', '')),
+                    'trim'
+                );
+
+                if (!empty($product_ids)) {
+                    $formatted_products = [];
+
+                    foreach ($product_ids as $product_id) {
+                        try {
+                            $product = \Stripe\Product::retrieve([
+                                'id' => $product_id,
+                                'expand' => ['default_price']
+                            ]);
+
+                            if ($product->active && $product->default_price) {
+                                $image_url = $product->images[0] ?? null;
+                                $cached_image_url = $this->cache_image($image_url);
+
+                                $formatted_products[] = [
+                                    'id' => $product->id,
+                                    'name' => $product->name,
+                                    'description' => $product->description,
+                                    'price' => $product->default_price->unit_amount,
+                                    'currency' => $product->default_price->currency,
+                                    'image' => $cached_image_url
+                                ];
+                            }
+                        } catch (\Exception $e) {
+                            error_log('Error refreshing Stripe product ' . $product_id . ': ' . $e->getMessage());
+                            continue;
+                        }
+                    }
+
+                    // Sort products by price
+                    usort($formatted_products, function ($a, $b) {
+                        return $a['price'] - $b['price'];
+                    });
+
+                    set_transient('stripe_products_cache', $formatted_products, 21600); // 6 hours
+                }
+            } catch (\Exception $e) {
+                error_log('Error in cron refresh of Stripe products: ' . $e->getMessage());
+            }
+        }
+
+        // Check and refresh shipping rate info if expired
+        $shipping_rate_info = get_transient('stripe_shipping_rate_info');
+        if ($shipping_rate_info === false && !empty($this->shipping_rate_id)) {
+            try {
+                $this->init_stripe();
+                $shipping_rate = \Stripe\ShippingRate::retrieve($this->shipping_rate_id);
+                $shipping_rate_info = [
+                    'amount' => $shipping_rate->fixed_amount->amount,
+                    'currency' => $shipping_rate->fixed_amount->currency,
+                    'display_name' => $shipping_rate->display_name
+                ];
+                set_transient('stripe_shipping_rate_info', $shipping_rate_info, 21600); // 6 hours
+            } catch (\Exception $e) {
+                error_log('Error in cron refresh of shipping rate: ' . $e->getMessage());
+            }
         }
     }
 }
