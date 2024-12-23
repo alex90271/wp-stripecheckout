@@ -45,6 +45,8 @@ class StripeCheckoutIntegration
         add_action('admin_menu', array($this, 'add_settings_page'));
         add_action('rest_api_init', array($this->webhook_handler, 'register_webhook_endpoint'));
         add_action('admin_init', array($this, 'handle_clear_cache_button'));
+        add_action('admin_post_create_checkout_session', array($this, 'handle_checkout_submission'));
+        add_action('admin_post_nopriv_create_checkout_session', array($this, 'handle_checkout_submission'));
 
         // Register cron event
         add_action('init', array($this, 'register_cron_refresh'));
@@ -801,23 +803,161 @@ class StripeCheckoutIntegration
         return array_values($grouped_cart);
     }
 
-    public function enqueue_scripts()
-    {
+    public function enqueue_scripts() {
         if (is_page() && get_the_ID() == $this->get_store_page_id()) {
             wp_enqueue_script('stripe-checkout', plugin_dir_url(__FILE__) . 'js/stripe-checkout.js', array('jquery'), $this->VER, true);
             wp_enqueue_style('stripe-checkout-style', plugin_dir_url(__FILE__) . 'css/stripe-checkout.css', '', $this->VER);
-
+    
             $this->fetch_shipping_rate_info();
-
+            
+            // Fetch products and prepare them for JavaScript
+            $products = $this->get_products_for_frontend();
+    
             wp_localize_script('stripe-checkout', 'stripe_checkout_vars', array(
-                'ajax_url' => admin_url('admin-ajax.php'),
+                'products' => $products,
                 'shipping_rate_id' => $this->shipping_rate_id,
                 'shipping_rate_info' => $this->shipping_rate_info,
                 'store_disabled' => get_option('stripe_disable_store', 0),
                 'max_quantity_per_item' => get_option('stripe_max_quantity_per_item', 10),
-                'fetch_products_nonce' => wp_create_nonce('fetch_products_nonce'),
-                'checkout_nonce' => wp_create_nonce('checkout_nonce')
+                'checkout_url' => esc_url(admin_url('admin-post.php?action=create_checkout_session'))
             ));
+        }
+    }
+
+    public function handle_checkout_submission() {
+        if (!isset($_POST['cart_data'])) {
+            wp_redirect(home_url('/stripe-store?error=invalid_cart'));
+            exit;
+        }
+    
+        try {
+            $cart = json_decode(stripslashes($_POST['cart_data']), true);
+            $this->init_stripe();
+            $line_items = $this->group_cart_items($cart);
+    
+            // Get custom messages from options
+            $receipt_message = get_option('stripe_checkout_receipt_message', ' ');
+            $terms_message = get_option('stripe_checkout_terms_message', 'I agree to any terms of service and refund policy');
+            $shipping_message = get_option('stripe_checkout_shipping_message', 'Please allow 5-10 days for orders to arrive');
+    
+            // Replace placeholders in terms message
+            $terms_message = str_replace(
+                ['{site_name}', '{site_url}'],
+                [get_bloginfo('name'), get_site_url()],
+                $terms_message
+            );
+    
+            $session_params = [
+                'line_items' => $line_items,
+                'mode' => 'payment',
+                'success_url' => home_url('/stripe-store?checkout=success'),
+                'cancel_url' => home_url('/stripe-store?checkout=cancelled'),
+                'phone_number_collection' => [
+                    'enabled' => true,
+                ],
+                'consent_collection' => [
+                    'terms_of_service' => 'required',
+                ],
+                'custom_text' => [
+                    'shipping_address' => [
+                        'message' => $receipt_message
+                    ],
+                    'terms_of_service_acceptance' => [
+                        'message' => $terms_message
+                    ],
+                    'submit' => [
+                        'message' => $shipping_message
+                    ],
+                ],
+                "submit_type" => 'pay',
+                'shipping_address_collection' => [
+                    'allowed_countries' => ['US'],
+                ],
+            ];
+    
+            if ($this->enable_invoice_creation === 'yes') {
+                $session_params['invoice_creation'] = [
+                    'enabled' => true,
+                ];
+            }
+    
+            if (!empty($this->shipping_rate_id)) {
+                $session_params['shipping_options'] = [
+                    [
+                        'shipping_rate' => $this->shipping_rate_id,
+                    ],
+                ];
+            }
+    
+            $session = \Stripe\Checkout\Session::create($session_params);
+    
+            wp_redirect($session->url);
+            exit;
+    
+        } catch (\Exception $e) {
+            error_log('Checkout error: ' . $e->getMessage());
+            wp_redirect(home_url('/stripe-store?error=checkout_failed'));
+            exit;
+        }
+    }
+    
+    private function get_products_for_frontend() {
+        $cache_key = 'stripe_products_cache';
+        $cached_products = get_transient($cache_key);
+    
+        if ($cached_products !== false) {
+            return $cached_products;
+        }
+    
+        try {
+            $this->init_stripe();
+            $product_ids = array_filter(
+                explode("\n", get_option('stripe_product_ids', '')),
+                'trim'
+            );
+    
+            if (empty($product_ids)) {
+                return [];
+            }
+    
+            $formatted_products = [];
+    
+            foreach ($product_ids as $product_id) {
+                try {
+                    $product = \Stripe\Product::retrieve([
+                        'id' => $product_id,
+                        'expand' => ['default_price']
+                    ]);
+    
+                    if ($product->active && $product->default_price) {
+                        $image_url = $product->images[0] ?? null;
+                        $cached_image_url = $this->cache_image($image_url);
+    
+                        $formatted_products[] = [
+                            'id' => $product->id,
+                            'name' => $product->name,
+                            'description' => $product->description,
+                            'price' => $product->default_price->unit_amount,
+                            'currency' => $product->default_price->currency,
+                            'image' => $cached_image_url
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    error_log('Error fetching Stripe product ' . $product_id . ': ' . $e->getMessage());
+                    continue;
+                }
+            }
+    
+            // Sort products by price
+            usort($formatted_products, function($a, $b) {
+                return $a['price'] - $b['price'];
+            });
+    
+            set_transient($cache_key, $formatted_products, 21600); // 6 hours cache
+            return $formatted_products;
+        } catch (\Exception $e) {
+            error_log('Error fetching Stripe products: ' . $e->getMessage());
+            return [];
         }
     }
     public function register_cron_refresh()
