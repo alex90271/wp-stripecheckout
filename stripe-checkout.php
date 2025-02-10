@@ -701,9 +701,20 @@ class StripeCheckoutIntegration
             $line_items = $this->group_cart_items($cart);
 
             // Get custom messages from options
-            $receipt_message = get_option('stripe_checkout_receipt_message', 'You may receive communications about your order at the email address provided above');
-            $terms_message = get_option('stripe_checkout_terms_message', 'By placing an order I understand I am bound by the terms and conditons located at {site_url}');
-            $shipping_message = get_option('stripe_checkout_shipping_message', 'Orders are generally processed by the next business day');
+            $receipt_message = get_option('stripe_checkout_receipt_message');
+            if (!$receipt_message || $receipt_message == " ") {
+                $receipt_message = 'You may receive communications about your order at the email address provided above';
+            }
+            
+            $terms_message = get_option('stripe_checkout_terms_message');
+            if (!$terms_message || $terms_message == " ") {
+                $terms_message = 'I agree to the Terms, Privacy, and Return policies (linked below)';
+            }
+            
+            $shipping_message = get_option('stripe_checkout_shipping_message');
+            if (!$shipping_message || $shipping_message == " " ){
+                $shipping_message = 'Orders are generally processed by the next business day';
+            }
 
             // Replace placeholders in terms message
             $terms_message = str_replace(
